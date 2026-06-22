@@ -697,6 +697,10 @@ function showPage(pageId){
   if(pageId === "dashboardMecanique") { setTimeout(()=>{ renderDashboardMecanique(); }, 0); }
   if(pageId === "devisFacture") { setTimeout(()=>{ majNumeroDocument(); }, 100); }
   if(pageId === "relancesAssurance") { setTimeout(()=>{ initRelancesAssurance(); }, 0); }
+  // Nouveaux modules
+  if(pageId === "stockPieces")         { setTimeout(()=>{ renderStock(); }, 0); }
+  if(pageId === "planningTechniciens") { setTimeout(()=>{ renderPlanning(); }, 0); }
+  if(pageId === "outilsRapides")       { setTimeout(()=>{ renderCatalogue(); renderCommandes(); renderCalc(); majCompteursCmds(); }, 0); }
   document.querySelectorAll(".page").forEach(p => p.classList.add("hidden"));
   const page = document.getElementById(pageId);
   if(page) page.classList.remove("hidden");
@@ -5580,3 +5584,868 @@ document.addEventListener("DOMContentLoaded", ()=>{
   }
 });
 
+/* =====================================================================
+   MODULE STOCK DE PIÈCES
+===================================================================== */
+
+let stockPieces = JSON.parse(localStorage.getItem("stockPieces")) || [];
+
+function saveStock(){
+  localStorage.setItem("stockPieces", JSON.stringify(stockPieces));
+  if(db && _firebaseActif){
+    db.ref("/stockPieces").set(stockPieces).catch(e=>console.warn("Erreur save stock:",e));
+  }
+  majCompteursBadgeStock();
+}
+
+function majCompteursBadgeStock(){
+  const rupture = stockPieces.filter(p => p.quantite <= 0).length;
+  const faible  = stockPieces.filter(p => p.quantite > 0 && p.quantite <= p.seuilAlerte).length;
+  const valeur  = stockPieces.reduce((a,p) => a + (p.quantite * (p.prixHT||0)), 0);
+
+  const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+  set("stockTotal",   stockPieces.length);
+  set("stockFaible",  faible);
+  set("stockRupture", rupture);
+  set("stockValeur",  valeur.toLocaleString("fr-FR",{minimumFractionDigits:2}) + " €");
+
+  const badge = document.getElementById("badgeStock");
+  if(badge){
+    const nb = rupture + faible;
+    badge.textContent = nb;
+    badge.style.display = nb > 0 ? "" : "none";
+  }
+}
+
+function renderStock(){
+  const tbody = document.getElementById("listeStock");
+  if(!tbody) return;
+
+  const recherche = (document.getElementById("stockRecherche")?.value||"").toLowerCase();
+  const categ     = document.getElementById("stockFiltreCategorie")?.value || "";
+  const alerte    = document.getElementById("stockFiltreAlerte")?.value    || "";
+
+  let liste = stockPieces.filter((p,i) => {
+    p._index = i;
+    const txt = `${p.reference} ${p.designation} ${p.fournisseur||""}`.toLowerCase();
+    if(recherche && !txt.includes(recherche)) return false;
+    if(categ && p.categorie !== categ) return false;
+    if(alerte === "rupture" && p.quantite > 0) return false;
+    if(alerte === "faible"  && !(p.quantite > 0 && p.quantite <= p.seuilAlerte)) return false;
+    if(alerte === "ok"      && p.quantite <= p.seuilAlerte) return false;
+    return true;
+  });
+
+  if(liste.length === 0){
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#64748b;padding:24px;">Aucune pièce trouvée</td></tr>`;
+    majCompteursBadgeStock();
+    return;
+  }
+
+  tbody.innerHTML = liste.map(p => {
+    let statutHtml, rowStyle = "";
+    if(p.quantite <= 0){
+      statutHtml = `<span style="background:#7f1d1d;color:#fca5a5;padding:3px 8px;border-radius:6px;font-size:12px;">🔴 Rupture</span>`;
+      rowStyle = "background:rgba(127,29,29,0.15);";
+    } else if(p.quantite <= p.seuilAlerte){
+      statutHtml = `<span style="background:#78350f;color:#fde68a;padding:3px 8px;border-radius:6px;font-size:12px;">⚠️ Stock faible</span>`;
+      rowStyle = "background:rgba(120,53,15,0.12);";
+    } else {
+      statutHtml = `<span style="background:#14532d;color:#86efac;padding:3px 8px;border-radius:6px;font-size:12px;">✅ OK</span>`;
+    }
+    return `<tr style="${rowStyle}">
+      <td><b style="color:#38bdf8;">${escHtml(p.reference)}</b></td>
+      <td>${escHtml(p.designation)}</td>
+      <td><span style="font-size:12px;background:#1e293b;padding:2px 8px;border-radius:4px;">${escHtml(p.categorie||"—")}</span></td>
+      <td style="text-align:center;font-size:16px;font-weight:bold;color:${p.quantite<=0?"#f87171":p.quantite<=p.seuilAlerte?"#fbbf24":"#34d399"};">${p.quantite}</td>
+      <td style="text-align:center;color:#64748b;">${p.seuilAlerte}</td>
+      <td>${p.prixHT ? p.prixHT.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</td>
+      <td style="color:#94a3b8;font-size:13px;">${escHtml(p.fournisseur||"—")}</td>
+      <td>${statutHtml}</td>
+      <td>
+        <button onclick="modifierStock(${p._index}, 1)"  style="background:#14532d;padding:4px 8px;font-size:12px;">+1</button>
+        <button onclick="modifierStock(${p._index}, -1)" style="background:#7f1d1d;padding:4px 8px;font-size:12px;">-1</button>
+        <button onclick="editerPiece(${p._index})"       style="background:#1e40af;padding:4px 8px;font-size:12px;">✏️</button>
+        <button onclick="supprimerPiece(${p._index})"    class="delete-btn" style="padding:4px 8px;font-size:12px;">🗑</button>
+      </td>
+    </tr>`;
+  }).join("");
+
+  majCompteursBadgeStock();
+
+  // Alertes visuelles
+  const zoneAlertes = document.getElementById("alertesStock");
+  if(zoneAlertes){
+    const enRupture = stockPieces.filter(p=>p.quantite<=0);
+    const enFaible  = stockPieces.filter(p=>p.quantite>0 && p.quantite<=p.seuilAlerte);
+    let html = "";
+    if(enRupture.length){
+      html += `<div style="background:#7f1d1d;border:1px solid #dc2626;border-radius:10px;padding:14px 18px;margin-bottom:12px;">
+        <b style="color:#fca5a5;">🔴 Rupture de stock (${enRupture.length} pièce${enRupture.length>1?"s":""}) :</b>
+        <ul style="margin:8px 0 0 16px;color:#fca5a5;font-size:13px;">
+          ${enRupture.map(p=>`<li>${escHtml(p.reference)} — ${escHtml(p.designation)} ${p.fournisseur?`(${escHtml(p.fournisseur)})`:""}. Commander dès que possible.</li>`).join("")}
+        </ul></div>`;
+    }
+    if(enFaible.length){
+      html += `<div style="background:#78350f;border:1px solid #f59e0b;border-radius:10px;padding:14px 18px;">
+        <b style="color:#fde68a;">⚠️ Stock faible (${enFaible.length} pièce${enFaible.length>1?"s":""}) :</b>
+        <ul style="margin:8px 0 0 16px;color:#fde68a;font-size:13px;">
+          ${enFaible.map(p=>`<li>${escHtml(p.reference)} — ${escHtml(p.designation)} : ${p.quantite} restant${p.quantite>1?"s":""} (seuil : ${p.seuilAlerte})</li>`).join("")}
+        </ul></div>`;
+    }
+    zoneAlertes.innerHTML = html;
+  }
+}
+
+function modifierStock(index, delta){
+  if(!stockPieces[index]) return;
+  stockPieces[index].quantite = Math.max(0, (stockPieces[index].quantite||0) + delta);
+  saveStock();
+  renderStock();
+  toast(`Stock mis à jour : ${stockPieces[index].designation} → ${stockPieces[index].quantite}`);
+}
+
+function ouvrirAjoutPiece(index){
+  const estEdit = index !== undefined && stockPieces[index];
+  const p = estEdit ? stockPieces[index] : {};
+  ouvrirModal(estEdit ? "✏️ Modifier la pièce" : "➕ Ajouter une pièce",
+    `<div style="display:flex;flex-direction:column;gap:12px;">
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Référence *</label>
+          <input type="text" id="sp_ref" value="${escHtml(p.reference||"")}" placeholder="Ex: PB-PEUG308-2019">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Catégorie</label>
+          <select id="sp_categ">
+            ${["Vitrage","Mécanique","Carrosserie","Électrique","Consommable","Autre"].map(c=>`<option value="${c}" ${(p.categorie||"")==c?"selected":""}>${c}</option>`).join("")}
+          </select>
+        </div>
+        <div style="grid-column:1/-1;">
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Désignation *</label>
+          <input type="text" id="sp_design" value="${escHtml(p.designation||"")}" placeholder="Ex: Pare-brise Peugeot 308 2014-2021">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Quantité en stock</label>
+          <input type="number" id="sp_qte" value="${p.quantite||0}" min="0">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Seuil d'alerte</label>
+          <input type="number" id="sp_seuil" value="${p.seuilAlerte||2}" min="0">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Prix HT (€)</label>
+          <input type="number" id="sp_prix" value="${p.prixHT||""}" step="0.01" placeholder="0.00">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Fournisseur</label>
+          <input type="text" id="sp_fourni" value="${escHtml(p.fournisseur||"")}" placeholder="Ex: AD Distribution">
+        </div>
+        <div style="grid-column:1/-1;">
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Emplacement / Référence fournisseur</label>
+          <input type="text" id="sp_emplacement" value="${escHtml(p.emplacement||"")}" placeholder="Ex: Étagère B3, Réf. AD 12345">
+        </div>
+      </div>
+    </div>`,
+    function(){
+      const ref = document.getElementById("sp_ref")?.value.trim();
+      const des = document.getElementById("sp_design")?.value.trim();
+      if(!ref || !des){ toast("Référence et désignation obligatoires","error"); return false; }
+      const piece = {
+        reference:   ref,
+        designation: des,
+        categorie:   document.getElementById("sp_categ")?.value || "Autre",
+        quantite:    parseInt(document.getElementById("sp_qte")?.value||"0"),
+        seuilAlerte: parseInt(document.getElementById("sp_seuil")?.value||"2"),
+        prixHT:      parseFloat(document.getElementById("sp_prix")?.value||"0")||0,
+        fournisseur: document.getElementById("sp_fourni")?.value.trim()||"",
+        emplacement: document.getElementById("sp_emplacement")?.value.trim()||"",
+        dateMAJ:     new Date().toISOString().split("T")[0]
+      };
+      if(estEdit){ stockPieces[index] = piece; }
+      else { stockPieces.push(piece); }
+      saveStock();
+      renderStock();
+      toast(estEdit ? "Pièce modifiée ✓" : "Pièce ajoutée ✓");
+    }
+  );
+}
+
+function editerPiece(index){ ouvrirAjoutPiece(index); }
+
+function supprimerPiece(index){
+  confirmerAction(`Supprimer "${stockPieces[index]?.designation}" du stock ?`, ()=>{
+    stockPieces.splice(index,1);
+    saveStock();
+    renderStock();
+    toast("Pièce supprimée");
+  });
+}
+
+function exporterStockCSV(){
+  const lignes = ["Référence;Désignation;Catégorie;Quantité;Seuil;Prix HT;Fournisseur;Emplacement"];
+  stockPieces.forEach(p=>{
+    lignes.push([p.reference,p.designation,p.categorie,p.quantite,p.seuilAlerte,(p.prixHT||0).toFixed(2),p.fournisseur||"",p.emplacement||""].join(";"));
+  });
+  const blob = new Blob(["\uFEFF"+lignes.join("\n")], {type:"text/csv;charset=utf-8;"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "stock-pieces-"+new Date().toISOString().split("T")[0]+".csv";
+  a.click();
+  toast("Export CSV téléchargé ✓");
+}
+
+/* =====================================================================
+   MODULE PLANNING TECHNICIENS
+===================================================================== */
+
+let tachesPlanning = JSON.parse(localStorage.getItem("tachesPlanning")) || [];
+let _semaineOffset = 0;
+
+const COULEURS_TECH = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#ec4899","#84cc16"];
+
+function savePlanning(){
+  localStorage.setItem("tachesPlanning", JSON.stringify(tachesPlanning));
+  if(db && _firebaseActif){
+    db.ref("/tachesPlanning").set(tachesPlanning).catch(e=>console.warn("Erreur save planning:",e));
+  }
+}
+
+function getLundiSemaine(offset){
+  const auj = new Date();
+  const jour = auj.getDay() || 7;
+  const lundi = new Date(auj);
+  lundi.setDate(auj.getDate() - jour + 1 + offset * 7);
+  lundi.setHours(0,0,0,0);
+  return lundi;
+}
+
+function semainePrec(){ _semaineOffset--; renderPlanning(); }
+function semaineSuiv(){ _semaineOffset++; renderPlanning(); }
+function semaineAujourd(){ _semaineOffset=0; renderPlanning(); }
+
+function getTechniciens(){
+  const set = new Set();
+  // Récupérer techniciens depuis dossiers mécanique
+  if(typeof dossiersMecanique !== "undefined"){
+    dossiersMecanique.forEach(d=>{ if(d.technicien) set.add(d.technicien); });
+  }
+  tachesPlanning.forEach(t=>{ if(t.technicien) set.add(t.technicien); });
+  if(set.size === 0){ set.add("Anthony"); }
+  return Array.from(set).sort();
+}
+
+function couleurTech(nom){
+  const techs = getTechniciens();
+  return COULEURS_TECH[techs.indexOf(nom) % COULEURS_TECH.length] || "#64748b";
+}
+
+function renderPlanning(){
+  const lundi = getLundiSemaine(_semaineOffset);
+  const jours = [];
+  const nomsJours = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
+  for(let i=0; i<6; i++){
+    const d = new Date(lundi);
+    d.setDate(lundi.getDate() + i);
+    jours.push(d);
+  }
+
+  const label = document.getElementById("labelSemaine");
+  if(label){
+    const fin = jours[5];
+    label.textContent = `Semaine du ${lundi.toLocaleDateString("fr-FR",{day:"numeric",month:"long"})} au ${fin.toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}`;
+  }
+
+  const techs = getTechniciens();
+
+  // Légende
+  const legend = document.getElementById("legendeTechniciens");
+  if(legend){
+    legend.innerHTML = techs.map(t=>`
+      <div style="display:flex;align-items:center;gap:6px;background:#1e293b;padding:5px 12px;border-radius:6px;border-left:3px solid ${couleurTech(t)};">
+        <span style="width:10px;height:10px;border-radius:50%;background:${couleurTech(t)};display:inline-block;"></span>
+        <span style="font-size:13px;">${escHtml(t)}</span>
+      </div>`).join("");
+  }
+
+  // Grille
+  const grille = document.getElementById("grillePlanning");
+  if(!grille) return;
+
+  const auj = new Date(); auj.setHours(0,0,0,0);
+
+  let html = `<table style="width:100%;border-collapse:collapse;min-width:600px;">
+    <thead><tr>
+      <th style="background:#0f172a;padding:10px;font-size:13px;color:#94a3b8;width:80px;text-align:left;">Technicien</th>
+      ${jours.map((d,i)=>{
+        const estAuj = d.getTime()===auj.getTime();
+        return `<th style="background:${estAuj?"#1e3a5f":"#0f172a"};padding:10px 8px;font-size:13px;color:${estAuj?"#38bdf8":"#94a3b8"};border-left:1px solid #1e293b;text-align:center;">
+          <div style="font-weight:bold;">${nomsJours[i]}</div>
+          <div style="font-size:11px;color:#64748b;">${d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</div>
+        </th>`;
+      }).join("")}
+    </tr></thead>
+    <tbody>`;
+
+  techs.forEach(tech=>{
+    html += `<tr>
+      <td style="padding:8px;font-size:13px;font-weight:bold;color:${couleurTech(tech)};border-top:1px solid #1e293b;vertical-align:top;white-space:nowrap;">
+        ${escHtml(tech)}
+      </td>`;
+    jours.forEach(d=>{
+      const dateStr = d.toISOString().split("T")[0];
+      const taches = tachesPlanning.filter(t => t.technicien===tech && t.date===dateStr);
+      const estAuj = d.getTime()===auj.getTime();
+      html += `<td style="padding:4px;border-left:1px solid #1e293b;border-top:1px solid #1e293b;vertical-align:top;min-height:60px;background:${estAuj?"rgba(56,189,248,0.04)":""};" onclick="ouvrirAjoutTache('${tech}','${dateStr}')">`;
+      taches.forEach((t,ti)=>{
+        const idx = tachesPlanning.indexOf(t);
+        html += `<div style="background:${couleurTech(tech)}22;border-left:3px solid ${couleurTech(tech)};border-radius:4px;padding:4px 6px;margin-bottom:3px;font-size:11px;cursor:pointer;position:relative;" onclick="event.stopPropagation();voirTache(${idx})">
+          <div style="font-weight:bold;color:${couleurTech(tech)};">${t.heureDebut||""}${t.heureFin?" - "+t.heureFin:""}</div>
+          <div style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;">${escHtml(t.titre)}</div>
+          <button onclick="event.stopPropagation();supprimerTache(${idx})" style="position:absolute;top:2px;right:2px;background:transparent;border:none;color:#64748b;padding:0;font-size:10px;cursor:pointer;">✖</button>
+        </div>`;
+      });
+      html += `<div style="text-align:center;color:#1e3a5f;font-size:18px;line-height:2;cursor:pointer;" onclick="ouvrirAjoutTache('${tech}','${dateStr}')">+</div>`;
+      html += `</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table>`;
+  grille.innerHTML = html;
+}
+
+function voirTache(index){
+  const t = tachesPlanning[index];
+  if(!t) return;
+  ouvrirModal(`📋 Tâche — ${escHtml(t.technicien)}`,
+    `<div style="display:flex;flex-direction:column;gap:10px;font-size:14px;">
+      <p><b>Titre :</b> ${escHtml(t.titre)}</p>
+      <p><b>Date :</b> ${new Date(t.date+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
+      <p><b>Horaire :</b> ${escHtml(t.heureDebut||"—")} → ${escHtml(t.heureFin||"—")}</p>
+      ${t.description ? `<p><b>Détail :</b> ${escHtml(t.description)}</p>` : ""}
+      ${t.dossierRef ? `<p><b>Dossier :</b> ${escHtml(t.dossierRef)}</p>` : ""}
+      <p><b>Type :</b> <span style="background:#1e293b;padding:2px 8px;border-radius:4px;">${escHtml(t.type||"Intervention")}</span></p>
+    </div>`,
+    null
+  );
+  setTimeout(()=>{ const btn=document.getElementById("modalBtnOk"); if(btn) btn.style.display="none"; },50);
+}
+
+function ouvrirAjoutTache(techPrefill, datePrefill){
+  const techs = getTechniciens();
+  const lundi = getLundiSemaine(_semaineOffset);
+  const dateDefaut = datePrefill || lundi.toISOString().split("T")[0];
+  ouvrirModal("➕ Ajouter une tâche au planning",
+    `<div style="display:flex;flex-direction:column;gap:12px;">
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+        <div style="grid-column:1/-1;">
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Titre *</label>
+          <input type="text" id="pt_titre" placeholder="Ex: Remplacement courroie de distribution" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Technicien *</label>
+          <select id="pt_tech" style="width:100%;box-sizing:border-box;">
+            ${techs.map(t=>`<option value="${escHtml(t)}" ${t===(techPrefill||"")?"selected":""}>${escHtml(t)}</option>`).join("")}
+            <option value="__nouveau__">➕ Nouveau technicien...</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Date *</label>
+          <input type="date" id="pt_date" value="${dateDefaut}" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Heure début</label>
+          <input type="time" id="pt_hdebut" value="08:00" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Heure fin</label>
+          <input type="time" id="pt_hfin" value="12:00" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Type</label>
+          <select id="pt_type" style="width:100%;box-sizing:border-box;">
+            <option>Intervention</option>
+            <option>Révision</option>
+            <option>Vitrage</option>
+            <option>Expertise</option>
+            <option>Livraison</option>
+            <option>Formation</option>
+            <option>Absence</option>
+            <option>Congé</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Référence dossier</label>
+          <input type="text" id="pt_dossier" placeholder="N° dossier lié (optionnel)" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div style="grid-column:1/-1;">
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Description</label>
+          <textarea id="pt_desc" rows="2" placeholder="Détails de l'intervention..." style="width:100%;box-sizing:border-box;resize:vertical;"></textarea>
+        </div>
+      </div>
+    </div>`,
+    function(){
+      let tech = document.getElementById("pt_tech")?.value;
+      if(tech === "__nouveau__"){
+        tech = prompt("Nom du nouveau technicien :");
+        if(!tech) return false;
+      }
+      const titre = document.getElementById("pt_titre")?.value.trim();
+      const date  = document.getElementById("pt_date")?.value;
+      if(!titre || !date || !tech){ toast("Titre, technicien et date obligatoires","error"); return false; }
+      tachesPlanning.push({
+        titre,
+        technicien: tech,
+        date,
+        heureDebut:  document.getElementById("pt_hdebut")?.value||"",
+        heureFin:    document.getElementById("pt_hfin")?.value||"",
+        type:        document.getElementById("pt_type")?.value||"Intervention",
+        dossierRef:  document.getElementById("pt_dossier")?.value.trim()||"",
+        description: document.getElementById("pt_desc")?.value.trim()||"",
+        dateCreation: new Date().toISOString()
+      });
+      savePlanning();
+      renderPlanning();
+      toast("Tâche ajoutée au planning ✓");
+    }
+  );
+}
+
+function supprimerTache(index){
+  confirmerAction(`Supprimer la tâche "${tachesPlanning[index]?.titre}" ?`, ()=>{
+    tachesPlanning.splice(index,1);
+    savePlanning();
+    renderPlanning();
+    toast("Tâche supprimée");
+  });
+}
+
+
+/* =====================================================================
+   MODULE OUTILS RAPIDES
+   1. Catalogue de prix
+   2. Calculateur de devis rapide
+   3. Commandes fournisseurs
+===================================================================== */
+
+/* ── 1. CATALOGUE DE PRIX ── */
+
+let catalogueTarifs = JSON.parse(localStorage.getItem("catalogueTarifs")) || [
+  { id:1, designation:"Remplacement pare-brise (fourni)",        categorie:"Vitrage",    prixHT:180, tva:20, unite:"forfait" },
+  { id:2, designation:"Remplacement vitre latérale (fournie)",   categorie:"Vitrage",    prixHT:120, tva:20, unite:"forfait" },
+  { id:3, designation:"Main d'œuvre vitrage",                    categorie:"Vitrage",    prixHT:80,  tva:20, unite:"heure"   },
+  { id:4, designation:"Recalibrage caméra ADAS",                 categorie:"Vitrage",    prixHT:150, tva:20, unite:"forfait" },
+  { id:5, designation:"Vidange moteur + filtre huile",           categorie:"Mécanique",  prixHT:45,  tva:20, unite:"forfait" },
+  { id:6, designation:"Remplacement plaquettes avant (paire)",   categorie:"Mécanique",  prixHT:65,  tva:20, unite:"forfait" },
+  { id:7, designation:"Remplacement disques avant (paire)",      categorie:"Mécanique",  prixHT:90,  tva:20, unite:"forfait" },
+  { id:8, designation:"Courroie de distribution",                categorie:"Mécanique",  prixHT:280, tva:20, unite:"forfait" },
+  { id:9, designation:"Main d'œuvre mécanique",                  categorie:"Mécanique",  prixHT:70,  tva:20, unite:"heure"   },
+  { id:10, designation:"Diagnostic électronique",                categorie:"Électrique", prixHT:60,  tva:20, unite:"forfait" },
+  { id:11, designation:"Remplacement batterie 12V",              categorie:"Électrique", prixHT:110, tva:20, unite:"forfait" },
+  { id:12, designation:"Recharge climatisation",                 categorie:"Mécanique",  prixHT:85,  tva:20, unite:"forfait" },
+];
+let _catalogueNextId = Math.max(...catalogueTarifs.map(t=>t.id||0), 0) + 1;
+
+function saveCatalogue(){
+  localStorage.setItem("catalogueTarifs", JSON.stringify(catalogueTarifs));
+  if(db && _firebaseActif) db.ref("/catalogueTarifs").set(catalogueTarifs).catch(e=>console.warn(e));
+}
+
+const CATEG_COULEURS = { "Vitrage":"#0891b2", "Mécanique":"#7c3aed", "Carrosserie":"#ea580c", "Électrique":"#ca8a04" };
+
+function renderCatalogue(){
+  const zone = document.getElementById("listeCatalogue");
+  if(!zone) return;
+  const filtre = document.getElementById("catalogueFiltreCategorie")?.value || "";
+  const liste  = filtre ? catalogueTarifs.filter(t=>t.categorie===filtre) : catalogueTarifs;
+
+  if(liste.length === 0){
+    zone.innerHTML = `<p style="color:#64748b;font-size:13px;grid-column:1/-1;">Aucun tarif dans cette catégorie. Cliquez sur ➕ Ajouter tarif.</p>`;
+    return;
+  }
+
+  zone.innerHTML = liste.map((t,i) => {
+    const couleur = CATEG_COULEURS[t.categorie] || "#64748b";
+    const idx = catalogueTarifs.indexOf(t);
+    const ttc = t.prixHT * (1 + t.tva/100);
+    return `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;border-top:3px solid ${couleur};position:relative;">
+      <div style="font-size:11px;color:${couleur};font-weight:bold;margin-bottom:4px;text-transform:uppercase;">${escHtml(t.categorie)}</div>
+      <div style="font-size:14px;font-weight:bold;color:#f1f5f9;margin-bottom:8px;line-height:1.3;">${escHtml(t.designation)}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <div>
+          <span style="font-size:16px;font-weight:bold;color:#34d399;">${t.prixHT.toLocaleString("fr-FR",{minimumFractionDigits:2})} € HT</span>
+          <span style="font-size:11px;color:#64748b;margin-left:4px;">/ ${escHtml(t.unite||"forfait")}</span><br>
+          <span style="font-size:12px;color:#94a3b8;">TTC : ${ttc.toLocaleString("fr-FR",{minimumFractionDigits:2})} € (TVA ${t.tva}%)</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button onclick="ajouterTarifAuDevis(${idx})" class="btn-success" style="font-size:12px;padding:5px 10px;">➕ Au devis</button>
+          <button onclick="ajouterTarifAuCalc(${idx})"  style="background:#334155;font-size:12px;padding:5px 10px;">🧮 Au calc.</button>
+        </div>
+      </div>
+      <div style="position:absolute;top:8px;right:8px;display:flex;gap:4px;">
+        <button onclick="editerTarif(${idx})" style="background:transparent;border:none;color:#64748b;font-size:12px;cursor:pointer;padding:2px 4px;">✏️</button>
+        <button onclick="supprimerTarif(${idx})" style="background:transparent;border:none;color:#64748b;font-size:12px;cursor:pointer;padding:2px 4px;">🗑</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function ajouterTarifAuDevis(idx){
+  const t = catalogueTarifs[idx];
+  if(!t) return;
+  if(typeof lignesDocument === "undefined"){ toast("Ouvrez d'abord le module Devis/Factures","error"); return; }
+  lignesDocument.push({ design: t.designation, qte: 1, prixHT: t.prixHT, tva: t.tva });
+  showPage("devisFacture");
+  setTimeout(()=>{ if(typeof renderLignes==="function") renderLignes(); }, 150);
+  toast(`"${t.designation}" ajouté au devis ✓`);
+}
+
+function ajouterTarifAuCalc(idx){
+  const t = catalogueTarifs[idx];
+  if(!t) return;
+  _calcLignes.push({ designation: t.designation, qte: 1, prixHT: t.prixHT, tva: t.tva });
+  renderCalc();
+  toast(`"${t.designation}" ajouté au calculateur ✓`);
+}
+
+function ouvrirAjoutTarif(index){
+  const estEdit = index !== undefined && catalogueTarifs[index];
+  const t = estEdit ? catalogueTarifs[index] : {};
+  ouvrirModal(estEdit ? "✏️ Modifier le tarif" : "➕ Nouveau tarif",
+    `<div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+      <div style="grid-column:1/-1;">
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Désignation *</label>
+        <input type="text" id="ct_design" value="${escHtml(t.designation||"")}" placeholder="Ex: Main d'œuvre freinage avant" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Catégorie</label>
+        <select id="ct_categ" style="width:100%;box-sizing:border-box;">
+          ${["Vitrage","Mécanique","Carrosserie","Électrique"].map(c=>`<option value="${c}" ${(t.categorie||"Mécanique")===c?"selected":""}>${c}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Unité</label>
+        <select id="ct_unite" style="width:100%;box-sizing:border-box;">
+          ${["forfait","heure","pièce","kit"].map(u=>`<option value="${u}" ${(t.unite||"forfait")===u?"selected":""}>${u}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Prix HT (€) *</label>
+        <input type="number" id="ct_prix" value="${t.prixHT||""}" step="0.01" placeholder="0.00" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">TVA</label>
+        <select id="ct_tva" style="width:100%;box-sizing:border-box;">
+          ${[20,10,5.5,0].map(v=>`<option value="${v}" ${(t.tva||20)===v?"selected":""}>${v}%</option>`).join("")}
+        </select>
+      </div>
+    </div>`,
+    function(){
+      const design = document.getElementById("ct_design")?.value.trim();
+      const prix   = parseFloat(document.getElementById("ct_prix")?.value||"0");
+      if(!design || !prix){ toast("Désignation et prix obligatoires","error"); return false; }
+      const tarif = {
+        id:          estEdit ? t.id : _catalogueNextId++,
+        designation: design,
+        categorie:   document.getElementById("ct_categ")?.value || "Mécanique",
+        unite:       document.getElementById("ct_unite")?.value || "forfait",
+        prixHT:      prix,
+        tva:         parseFloat(document.getElementById("ct_tva")?.value||"20")
+      };
+      if(estEdit){ catalogueTarifs[index] = tarif; }
+      else { catalogueTarifs.push(tarif); }
+      saveCatalogue();
+      renderCatalogue();
+      toast(estEdit ? "Tarif modifié ✓" : "Tarif ajouté ✓");
+    }
+  );
+}
+
+function editerTarif(idx){ ouvrirAjoutTarif(idx); }
+
+function supprimerTarif(idx){
+  confirmerAction(`Supprimer le tarif "${catalogueTarifs[idx]?.designation}" ?`, ()=>{
+    catalogueTarifs.splice(idx,1);
+    saveCatalogue();
+    renderCatalogue();
+    toast("Tarif supprimé");
+  });
+}
+
+/* ── 2. CALCULATEUR DE DEVIS RAPIDE ── */
+
+let _calcLignes = [];
+
+function ajouterLigneCalc(){
+  const design = document.getElementById("calcDesign")?.value.trim();
+  const qte    = parseFloat(document.getElementById("calcQte")?.value||"1");
+  const prix   = parseFloat(document.getElementById("calcPrix")?.value||"0");
+  const tva    = parseFloat(document.getElementById("calcTVA")?.value||"20");
+  if(!design){ toast("Désignation obligatoire","error"); return; }
+  if(!prix || prix <= 0){ toast("Prix obligatoire","error"); return; }
+  _calcLignes.push({ designation: design, qte, prixHT: prix, tva });
+  document.getElementById("calcDesign").value = "";
+  document.getElementById("calcPrix").value   = "";
+  document.getElementById("calcQte").value    = "1";
+  renderCalc();
+  document.getElementById("calcDesign")?.focus();
+}
+
+function renderCalc(){
+  const tbody = document.getElementById("calcLignes");
+  if(!tbody) return;
+  let totalHT = 0, totalTVA = 0;
+
+  if(_calcLignes.length === 0){
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:16px;">Aucune ligne — ajoutez des prestations ci-dessus</td></tr>`;
+  } else {
+    tbody.innerHTML = _calcLignes.map((l,i)=>{
+      const ht  = l.qte * l.prixHT;
+      const tva = ht * (l.tva/100);
+      totalHT  += ht;
+      totalTVA += tva;
+      return `<tr>
+        <td>${escHtml(l.designation)}</td>
+        <td style="text-align:center;">${l.qte}</td>
+        <td style="text-align:right;">${l.prixHT.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</td>
+        <td style="text-align:center;color:#94a3b8;">${l.tva}%</td>
+        <td style="text-align:right;font-weight:bold;">${(ht+tva).toLocaleString("fr-FR",{minimumFractionDigits:2})} €</td>
+        <td><button onclick="_calcLignes.splice(${i},1);renderCalc()" class="delete-btn" style="padding:3px 7px;font-size:11px;">✖</button></td>
+      </tr>`;
+    }).join("");
+  }
+
+  const fmt = v => v.toLocaleString("fr-FR",{minimumFractionDigits:2}) + " €";
+  const set = (id,val)=>{ const el=document.getElementById(id); if(el) el.textContent=val; };
+  set("calcTotalHT",  fmt(totalHT));
+  set("calcTotalTVA", fmt(totalTVA));
+  set("calcTotalTTC", fmt(totalHT+totalTVA));
+}
+
+function viderCalc(){
+  confirmerAction("Vider toutes les lignes du calculateur ?", ()=>{
+    _calcLignes = [];
+    renderCalc();
+    toast("Calculateur vidé");
+  });
+}
+
+function envoyerCalcVersDevis(){
+  if(_calcLignes.length === 0){ toast("Aucune ligne à envoyer","error"); return; }
+  if(typeof lignesDocument === "undefined"){ toast("Module Devis/Factures indisponible","error"); return; }
+  lignesDocument = _calcLignes.map(l=>({ design: l.designation, qte: l.qte, prixHT: l.prixHT, tva: l.tva }));
+  showPage("devisFacture");
+  setTimeout(()=>{ if(typeof renderLignes==="function") renderLignes(); toast(`${_calcLignes.length} ligne(s) envoyée(s) vers Devis/Factures ✓`); }, 150);
+}
+
+function copierCalcTexte(){
+  if(_calcLignes.length === 0){ toast("Aucune ligne à copier","error"); return; }
+  const lignes = _calcLignes.map(l=>{
+    const ttc = (l.qte * l.prixHT * (1 + l.tva/100));
+    return `${l.designation} — ${l.qte} x ${l.prixHT.toFixed(2)} € HT = ${ttc.toFixed(2)} € TTC`;
+  });
+  const totalTTC = _calcLignes.reduce((a,l)=>a+l.qte*l.prixHT*(1+l.tva/100),0);
+  lignes.push(`\nTOTAL TTC : ${totalTTC.toFixed(2)} €`);
+  navigator.clipboard.writeText(lignes.join("\n"))
+    .then(()=>toast("Devis copié dans le presse-papier ✓"))
+    .catch(()=>toast("Copie non disponible","error"));
+}
+
+/* ── 3. COMMANDES FOURNISSEURS ── */
+
+let commandesFournisseurs = JSON.parse(localStorage.getItem("commandesFournisseurs")) || [];
+let _cmdNextId = Math.max(...commandesFournisseurs.map(c=>parseInt(c.numero||"0")||0), 0) + 1;
+
+function saveCommandes(){
+  localStorage.setItem("commandesFournisseurs", JSON.stringify(commandesFournisseurs));
+  if(db && _firebaseActif) db.ref("/commandesFournisseurs").set(commandesFournisseurs).catch(e=>console.warn(e));
+  majCompteursCmds();
+}
+
+const STATUT_CMD_COULEUR = { "En attente":"#f59e0b", "En cours":"#2563eb", "Reçue":"#16a34a", "Annulée":"#64748b" };
+const STATUT_CMD_EMOJI   = { "En attente":"⏳", "En cours":"🚚", "Reçue":"✅", "Annulée":"❌" };
+
+function majCompteursCmds(){
+  const attente  = commandesFournisseurs.filter(c=>c.statut==="En attente").length;
+  const encours  = commandesFournisseurs.filter(c=>c.statut==="En cours").length;
+  const recues   = commandesFournisseurs.filter(c=>c.statut==="Reçue").length;
+  const montant  = commandesFournisseurs.reduce((a,c)=>a+(parseFloat(c.montantHT)||0),0);
+  const set=(id,val)=>{ const el=document.getElementById(id); if(el) el.textContent=val; };
+  set("cmdAttente", attente);
+  set("cmdEnCours", encours);
+  set("cmdRecues",  recues);
+  set("cmdMontantTotal", montant.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €");
+
+  // Peupler filtre fournisseurs
+  const sel = document.getElementById("cmdFiltreFournisseur");
+  if(sel){
+    const fournis = [...new Set(commandesFournisseurs.map(c=>c.fournisseur).filter(Boolean))].sort();
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">Tous les fournisseurs</option>` +
+      fournis.map(f=>`<option value="${escHtml(f)}" ${cur===f?"selected":""}>${escHtml(f)}</option>`).join("");
+  }
+}
+
+function renderCommandes(){
+  const tbody = document.getElementById("listeCommandes");
+  if(!tbody) return;
+  const filtreStatut   = document.getElementById("cmdFiltreStatut")?.value   || "";
+  const filtreFourni   = document.getElementById("cmdFiltreFournisseur")?.value || "";
+
+  let liste = commandesFournisseurs.filter((c,i)=>{
+    c._index = i;
+    if(filtreStatut && c.statut !== filtreStatut) return false;
+    if(filtreFourni && c.fournisseur !== filtreFourni) return false;
+    return true;
+  }).reverse();
+
+  if(liste.length === 0){
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#64748b;padding:20px;">Aucune commande</td></tr>`;
+    majCompteursCmds();
+    return;
+  }
+
+  tbody.innerHTML = liste.map(c=>{
+    const couleur = STATUT_CMD_COULEUR[c.statut] || "#64748b";
+    const emoji   = STATUT_CMD_EMOJI[c.statut]   || "•";
+    return `<tr>
+      <td><b style="color:#38bdf8;">CMD-${String(c.numero).padStart(4,"0")}</b></td>
+      <td style="white-space:nowrap;">${c.date||"—"}</td>
+      <td><b>${escHtml(c.fournisseur||"—")}</b></td>
+      <td>${escHtml(c.designation||"—")}<br><span style="font-size:11px;color:#64748b;">${escHtml(c.reference||"")}</span></td>
+      <td style="text-align:center;">${c.quantite||1}</td>
+      <td style="text-align:right;">${c.montantHT ? parseFloat(c.montantHT).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</td>
+      <td style="font-size:12px;color:#94a3b8;">${escHtml(c.dossierRef||"—")}</td>
+      <td>
+        <select onchange="changerStatutCmd(${c._index}, this.value)" style="font-size:12px;padding:3px 6px;background:#0f172a;border:1px solid ${couleur};color:${couleur};border-radius:4px;">
+          ${["En attente","En cours","Reçue","Annulée"].map(s=>`<option value="${s}" ${c.statut===s?"selected":""}>${STATUT_CMD_EMOJI[s]} ${s}</option>`).join("")}
+        </select>
+      </td>
+      <td style="font-size:12px;color:#94a3b8;white-space:nowrap;">${c.livraisonPrevue||"—"}</td>
+      <td>
+        <button onclick="editerCommande(${c._index})" style="background:#1e40af;font-size:11px;padding:3px 7px;">✏️</button>
+        <button onclick="supprimerCommande(${c._index})" class="delete-btn" style="font-size:11px;padding:3px 7px;">🗑</button>
+      </td>
+    </tr>`;
+  }).join("");
+
+  majCompteursCmds();
+}
+
+function changerStatutCmd(index, statut){
+  if(!commandesFournisseurs[index]) return;
+  commandesFournisseurs[index].statut = statut;
+  saveCommandes();
+  renderCommandes();
+  toast(`Commande mise à jour : ${statut}`);
+}
+
+function ouvrirAjoutCommande(index){
+  const estEdit = index !== undefined && commandesFournisseurs[index];
+  const c = estEdit ? commandesFournisseurs[index] : {};
+  const today = new Date().toISOString().split("T")[0];
+  ouvrirModal(estEdit ? "✏️ Modifier la commande" : "➕ Nouvelle commande fournisseur",
+    `<div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+      <div style="grid-column:1/-1;">
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Pièce / Désignation *</label>
+        <input type="text" id="cmd_design" value="${escHtml(c.designation||"")}" placeholder="Ex: Pare-brise Peugeot 308 2019" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Fournisseur *</label>
+        <input type="text" id="cmd_fourni" value="${escHtml(c.fournisseur||"")}" placeholder="Ex: AD Distribution, Saint-Gobain..." style="width:100%;box-sizing:border-box;" list="listeFournisseursConnus">
+        <datalist id="listeFournisseursConnus">
+          ${[...new Set(commandesFournisseurs.map(x=>x.fournisseur).filter(Boolean))].map(f=>`<option value="${escHtml(f)}">`).join("")}
+          <option value="AD Distribution"><option value="AutoDistribution"><option value="Saint-Gobain Sekurit"><option value="Pilkington"><option value="PGA"><option value="Würth">
+        </datalist>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Référence pièce</label>
+        <input type="text" id="cmd_ref" value="${escHtml(c.reference||"")}" placeholder="Ex: SG-1234567" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Quantité</label>
+        <input type="number" id="cmd_qte" value="${c.quantite||1}" min="1" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Montant HT (€)</label>
+        <input type="number" id="cmd_montant" value="${c.montantHT||""}" step="0.01" placeholder="0.00" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Date commande</label>
+        <input type="date" id="cmd_date" value="${c.date||today}" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Livraison prévue</label>
+        <input type="date" id="cmd_livraison" value="${c.livraisonPrevue||""}" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Statut</label>
+        <select id="cmd_statut" style="width:100%;box-sizing:border-box;">
+          ${["En attente","En cours","Reçue","Annulée"].map(s=>`<option value="${s}" ${(c.statut||"En attente")===s?"selected":""}>${STATUT_CMD_EMOJI[s]} ${s}</option>`).join("")}
+        </select>
+      </div>
+      <div style="grid-column:1/-1;">
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Dossier lié (optionnel)</label>
+        <input type="text" id="cmd_dossier" value="${escHtml(c.dossierRef||"")}" placeholder="N° dossier ou nom client" style="width:100%;box-sizing:border-box;">
+      </div>
+      <div style="grid-column:1/-1;">
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Notes</label>
+        <textarea id="cmd_notes" rows="2" style="width:100%;box-sizing:border-box;resize:vertical;">${escHtml(c.notes||"")}</textarea>
+      </div>
+    </div>`,
+    function(){
+      const design = document.getElementById("cmd_design")?.value.trim();
+      const fourni = document.getElementById("cmd_fourni")?.value.trim();
+      if(!design || !fourni){ toast("Désignation et fournisseur obligatoires","error"); return false; }
+      const cmd = {
+        numero:          estEdit ? c.numero : _cmdNextId++,
+        designation:     design,
+        fournisseur:     fourni,
+        reference:       document.getElementById("cmd_ref")?.value.trim()||"",
+        quantite:        parseInt(document.getElementById("cmd_qte")?.value||"1"),
+        montantHT:       parseFloat(document.getElementById("cmd_montant")?.value||"0")||0,
+        date:            document.getElementById("cmd_date")?.value||"",
+        livraisonPrevue: document.getElementById("cmd_livraison")?.value||"",
+        statut:          document.getElementById("cmd_statut")?.value||"En attente",
+        dossierRef:      document.getElementById("cmd_dossier")?.value.trim()||"",
+        notes:           document.getElementById("cmd_notes")?.value.trim()||"",
+        dateCreation:    estEdit ? c.dateCreation : new Date().toISOString()
+      };
+      if(estEdit){ commandesFournisseurs[index] = cmd; }
+      else { commandesFournisseurs.push(cmd); }
+      saveCommandes();
+      renderCommandes();
+      toast(estEdit ? "Commande modifiée ✓" : "Commande ajoutée ✓");
+    }
+  );
+}
+
+function editerCommande(idx){ ouvrirAjoutCommande(idx); }
+
+function supprimerCommande(idx){
+  confirmerAction(`Supprimer la commande CMD-${String(commandesFournisseurs[idx]?.numero||"").padStart(4,"0")} ?`, ()=>{
+    commandesFournisseurs.splice(idx,1);
+    saveCommandes();
+    renderCommandes();
+    toast("Commande supprimée");
+  });
+}
+
+function exporterCommandesCSV(){
+  const lignes = ["N° Cmd;Date;Fournisseur;Désignation;Référence;Qté;Montant HT;Statut;Livraison prévue;Dossier"];
+  commandesFournisseurs.forEach(c=>{
+    lignes.push([
+      `CMD-${String(c.numero).padStart(4,"0")}`,
+      c.date||"", c.fournisseur||"", c.designation||"", c.reference||"",
+      c.quantite||1, (c.montantHT||0).toFixed(2),
+      c.statut||"", c.livraisonPrevue||"", c.dossierRef||""
+    ].join(";"));
+  });
+  const blob = new Blob(["\uFEFF"+lignes.join("\n")], {type:"text/csv;charset=utf-8;"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "commandes-"+new Date().toISOString().split("T")[0]+".csv";
+  a.click();
+  toast("Export CSV téléchargé ✓");
+}
