@@ -214,6 +214,35 @@
           <canvas id="graphiqueMensuelMecanique" width="700" height="180" style="width:100%;max-width:700px;display:block;margin:0 auto;"></canvas>
         </div>
       </div>
+      <!-- KPIs avancés -->
+      <div class="cards" style="margin-bottom:20px;">
+        <div class="card" style="border-top:3px solid #a78bfa;">
+          <h3 style="color:#a78bfa;">💳 Règlements</h3>
+          <div id="dashReglements" style="font-size:13px;line-height:2;color:var(--muted);margin-top:8px;"></div>
+        </div>
+        <div class="card" style="border-top:3px solid #34d399;">
+          <h3 style="color:#34d399;">📊 Marge brute</h3>
+          <div id="dashMarges" style="font-size:13px;line-height:2;color:var(--muted);margin-top:8px;"></div>
+        </div>
+        <div class="card" style="border-top:3px solid #f59e0b;">
+          <h3 style="color:#f59e0b;">🔄 Taux transformation</h3>
+          <div id="dashTransformation" style="font-size:13px;line-height:2;color:var(--muted);margin-top:8px;"></div>
+        </div>
+        <div class="card" style="border-top:3px solid #38bdf8;">
+          <h3 style="color:#38bdf8;">📅 Ce mois-ci</h3>
+          <div id="dashMoisEnCours" style="font-size:13px;line-height:2;color:var(--muted);margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <!-- Graphique CA 12 mois + comparaison N-1 -->
+      <div class="card" style="margin-bottom:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+          <h2 style="margin:0;">📈 CA mensuel — 12 mois (vs année précédente)</h2>
+          <div id="dashLegendCA" style="display:flex;gap:12px;font-size:12px;"></div>
+        </div>
+        <canvas id="graphiqueCA12Mois" width="900" height="220" style="width:100%;display:block;"></canvas>
+      </div>
+
       <!-- Alertes dossiers en retard -->
       <div id="alertesRetard" style="margin-bottom:20px;"></div>
 
@@ -254,9 +283,17 @@
 
       <h2>🚗 Véhicules</h2>
 
-      <div class="form-grid">
+      <!-- Recherche historique rapide -->
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="rechercheHistorique" placeholder="🔍 Rechercher par immatriculation, client, marque..." oninput="historiqueVehicule()" style="flex:1;min-width:220px;">
+          <button onclick="historiqueVehicule()" style="background:#0891b2;">🔍 Chercher</button>
+        </div>
+      </div>
 
-        <input type="text" id="rechercheHistorique" placeholder="🔍 Historique par immatriculation" onkeyup="historiqueVehicule()">
+      <div id="historiqueVehicule" style="margin-bottom:16px;"></div>
+
+      <div class="form-grid">
 
         <select id="marqueVehicule" onchange="chargerModeles()">
           <option value="">Choisir une marque</option>
@@ -303,8 +340,6 @@
         <button onclick="ajouterVehicule()">➕ Ajouter véhicule</button>
 
       </div>
-
-      <div id="historiqueVehicule"></div>
 
       <div class="table-wrapper">
         <table>
@@ -571,6 +606,7 @@
         <input type="date" id="dateRdv">
         <input type="time" id="heureRdv">
         <input type="text" id="clientRdv" placeholder="Client">
+        <input type="tel" id="telephoneRdv" placeholder="📱 Téléphone client">
         <input type="text" id="vehiculeRdv" placeholder="Véhicule">
         <input type="text" id="immatRdv" placeholder="Immatriculation">
         <input type="text" id="motifRdv" placeholder="Motif du rendez-vous">
@@ -581,6 +617,7 @@
           <option>Annulé</option>
         </select>
         <button onclick="ajouterRendezVous()">➕ Ajouter rendez-vous</button>
+        <button onclick="ouvrirSMSManager()" style="background:#16a34a;">📱 SMS clients</button>
       </div>
 
       <div class="table-wrapper">
@@ -625,23 +662,53 @@
 
       <h2>⚙ Informations Entreprise</h2>
 
-      <div class="form-grid">
-        <input type="text" id="societeNom" placeholder="Nom de la société">
-        <input type="text" id="societeAdresse" placeholder="Adresse">
-        <input type="text" id="societeTelephone" placeholder="Téléphone">
-        <input type="email" id="societeEmail" placeholder="Email">
-        <input type="text" id="societeSiret" placeholder="SIRET">
-        <div class="champ-fichier">
-          <label>🖼 Logo société</label>
-          <input type="file" id="societeLogo" accept="image/*">
+      <!-- Infos de base -->
+      <div class="card" style="margin-bottom:16px;">
+        <h3 style="color:#38bdf8;margin-bottom:12px;">🏢 Informations générales</h3>
+        <div class="form-grid">
+          <input type="text" id="societeNom" placeholder="Nom de la société / Raison sociale">
+          <input type="text" id="societeAdresse" placeholder="Adresse complète">
+          <input type="text" id="societeTelephone" placeholder="Téléphone">
+          <input type="email" id="societeEmail" placeholder="Email">
+          <div class="champ-fichier">
+            <label>🖼 Logo société</label>
+            <input type="file" id="societeLogo" accept="image/*">
+          </div>
         </div>
-        <button onclick="sauvegarderEntreprise()">💾 Enregistrer</button>
-        <button onclick="exporterDonnees()">📤 Exporter les données</button>
+      </div>
+
+      <!-- Mentions légales & facturation électronique -->
+      <div class="card" style="margin-bottom:16px;">
+        <h3 style="color:#a78bfa;margin-bottom:4px;">🧾 Mentions légales — Facturation électronique</h3>
+        <p style="font-size:12px;color:#64748b;margin-bottom:12px;">Obligatoire sur toutes les factures (réforme en vigueur sept. 2026). Ces informations apparaîtront automatiquement sur vos PDF et exports XML.</p>
+        <div class="form-grid">
+          <input type="text" id="societeSiret"    placeholder="N° SIRET (14 chiffres) *">
+          <input type="text" id="societeNaf"      placeholder="Code NAF / APE (ex: 4520A)">
+          <input type="text" id="societeTva"      placeholder="N° TVA intracommunautaire (ex: FR12345678901)">
+          <input type="text" id="societeFormeJuridique" placeholder="Forme juridique (ex: EI, SARL, SAS...)">
+          <input type="text" id="societeCapital"  placeholder="Capital social (si applicable, ex: 1 000 €)">
+          <input type="text" id="societeRcs"      placeholder="RCS (ex: RCS Boulogne-sur-Mer 123 456 789)">
+          <input type="text" id="societeCgu"      placeholder="Conditions de règlement (ex: 30 jours net)">
+          <input type="text" id="societePenalites" placeholder="Pénalités de retard (ex: 3× taux légal)">
+          <input type="text" id="societeIban"     placeholder="IBAN (pour virement)">
+          <input type="text" id="societeBic"      placeholder="BIC / SWIFT">
+        </div>
+        <div style="margin-top:12px;padding:10px 14px;background:#0f172a;border-radius:8px;border-left:3px solid #f59e0b;font-size:12px;color:#94a3b8;line-height:1.8;">
+          ⚠️ <b style="color:#f59e0b;">Rappel réglementaire :</b> La facturation électronique devient obligatoire pour les PME/TPE à compter du <b>1er septembre 2027</b> (émission) et réception dès septembre 2026.<br>
+          Vous pouvez dès maintenant exporter vos factures au format <b>XML Factur-X</b> compatible Chorus Pro et plateformes partenaires.
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="form-grid">
+        <button onclick="sauvegarderEntreprise()" class="btn-success">💾 Enregistrer</button>
+        <button onclick="ouvrirFacturationElectronique()" style="background:#7c3aed;">🧾 Facturation électronique</button>
+        <button onclick="exporterDonnees()">📤 Exporter données</button>
         <div class="champ-fichier">
           <label>📥 Importer une sauvegarde (.json)</label>
           <input type="file" id="importData" accept=".json" onchange="importerDonnees(event)">
         </div>
-        <button class="delete-btn" onclick="viderEntreprise()">🗑 Réinitialiser les infos société</button>
+        <button class="delete-btn" onclick="viderEntreprise()">🗑 Réinitialiser</button>
       </div>
 
       <div id="apercuEntreprise"></div>
@@ -722,6 +789,7 @@
             <option value="0">TVA 0%</option>
           </select>
           <button onclick="ajouterLigne()">➕</button>
+          <button onclick="ouvrirTMO()" style="background:#7c3aed;" title="Importer temps Autossimo">⏱ TMO</button>
         </div>
 
         <div class="table-wrapper">
@@ -765,8 +833,16 @@
         <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
           <button onclick="genererPdfDocument()">📄 Générer PDF</button>
           <button onclick="sauvegarderDocument()" class="btn-success">💾 Sauvegarder</button>
+          <button onclick="ouvrirSignatureDevis()" style="background:#0891b2;">✍️ Signature client</button>
           <button onclick="ouvrirTransfertVersDossier()" style="background:#7c3aed;">📂 Transférer vers dossier</button>
           <button onclick="resetDocument()" class="delete-btn">🗑 Effacer</button>
+
+          <!-- Zone signature -->
+          <div id="zoneSignatureApercue" style="display:none;margin-top:12px;padding:10px;background:#0f172a;border-radius:8px;border:1px solid #334155;">
+            <div style="font-size:12px;color:#64748b;margin-bottom:6px;">✍️ Signature client enregistrée :</div>
+            <img id="apercuSignature" style="background:#fff;border-radius:4px;max-width:300px;height:80px;">
+            <button onclick="effacerSignature()" style="background:#7f1d1d;font-size:11px;padding:3px 8px;margin-left:8px;">✖ Retirer</button>
+          </div>
 
           <!-- Panneau transfert vers dossier -->
           <div id="panneauTransfertDoc" style="display:none;margin-top:16px;padding:18px 20px;background:#1e1040;border:1px solid #7c3aed55;border-radius:12px;">

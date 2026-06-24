@@ -631,7 +631,7 @@ function toast(message, type="success"){
   if(existing) existing.remove();
 
   const el = document.createElement("div");
-  el.className = "toast" + (type === "error" ? " error" : "");
+  el.className = "toast" + (type === "error" ? " error" : type === "info" ? " info" : "");
   el.textContent = message;
   document.body.appendChild(el);
 
@@ -1003,31 +1003,99 @@ function renderVehicules(){
 ===================================== */
 
 function historiqueVehicule(){
-  const immat = document.getElementById("rechercheHistorique").value.toLowerCase();
-  const zone  = document.getElementById("historiqueVehicule");
+  const recherche = (document.getElementById("rechercheHistorique")?.value||"").trim().toLowerCase();
+  const zone = document.getElementById("historiqueVehicule");
   if(!zone) return;
+  if(!recherche){ zone.innerHTML=""; return; }
 
-  if(!immat){ zone.innerHTML=""; return; }
+  // Chercher dans dossiers vitrage + mécanique + documents
+  const dossiersV = dossiers.filter(d =>
+    (d.immat||"").toLowerCase().includes(recherche) ||
+    (d.client||"").toLowerCase().includes(recherche) ||
+    (d.vehicule||"").toLowerCase().includes(recherche) ||
+    (d.marque||"").toLowerCase().includes(recherche)
+  );
+  const dossiersM = (typeof dossiersMecanique !== "undefined" ? dossiersMecanique : []).filter(d =>
+    (d.immat||"").toLowerCase().includes(recherche) ||
+    (d.client||"").toLowerCase().includes(recherche) ||
+    (d.vehicule||"").toLowerCase().includes(recherche)
+  );
 
-  const resultats = dossiers.filter(d => d.immat && d.immat.toLowerCase().includes(immat));
-
-  if(resultats.length === 0){
-    zone.innerHTML = `<div class="card"><p style="color:var(--muted)">Aucun dossier trouvé pour cette immatriculation.</p></div>`;
+  if(dossiersV.length === 0 && dossiersM.length === 0){
+    zone.innerHTML = `<div class="card"><p style="color:#64748b;">Aucun résultat pour "<b>${escHtml(recherche)}</b>"</p></div>`;
     return;
   }
 
-  zone.innerHTML = resultats.map(d=>`
-    <div class="card">
-      <h3>${escHtml(d.immat)}</h3>
-      <p><b>Dossier :</b> ${escHtml(d.numero)}</p>
-      <p><b>Client :</b> ${escHtml(d.client)}</p>
-      <p><b>Assurance :</b> ${escHtml(d.assurance)}</p>
-      <p><b>Vitrage :</b> ${escHtml(d.vitrage||"")}</p>
-      <p><b>Date :</b> ${escHtml(d.dateCreation||"")}</p>
-      <p><b>Statut :</b> <span class="badge badge-${getBadgeClass(d.statut)}">${escHtml(d.statut)}</span></p>
-    </div>
-  `).join("");
+  // Regrouper par immatriculation
+  const groupes = {};
+  [...dossiersV.map(d=>({...d,_type:"vitrage"})), ...dossiersM.map(d=>({...d,_type:"mecanique"}))].forEach(d=>{
+    const key = (d.immat||d.vehicule||"Inconnu").toUpperCase();
+    if(!groupes[key]) groupes[key] = { immat:key, client:d.client||"", vehicule:d.vehicule||d.marque||"", dossiers:[] };
+    groupes[key].dossiers.push(d);
+  });
+
+  zone.innerHTML = Object.values(groupes).map(g => {
+    const totalCA = g.dossiers.reduce((a,d)=>a+Number(d.facture||d.devis||0),0);
+    const dernierD = g.dossiers.sort((a,b)=>new Date(b.dateCreation||b.date||0)-new Date(a.dateCreation||a.date||0))[0];
+    const docsVehicule = documents.filter(doc =>
+      g.dossiers.some(d=>d.numero===doc.dossierNumero)
+    );
+
+    return `<div class="card" style="border-left:4px solid #38bdf8;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:20px;font-weight:bold;color:#38bdf8;">${escHtml(g.immat)}</span>
+            <span style="font-size:13px;color:#94a3b8;">${escHtml(g.vehicule)}</span>
+          </div>
+          <div style="font-size:13px;color:#64748b;margin-top:2px;">👤 ${escHtml(g.client)} — ${g.dossiers.length} intervention${g.dossiers.length>1?"s":""} — CA total : <b style="color:#34d399;">${totalCA.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</b></div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:#64748b;">
+          Dernière intervention : ${dernierD.dateCreation||dernierD.date||"—"}
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table style="font-size:12px;">
+          <thead><tr style="background:#0f172a;">
+            <th>Date</th><th>Type</th><th>N° Dossier</th><th>Intervention</th><th>Statut</th><th>Montant</th><th>Documents</th>
+          </tr></thead>
+          <tbody>
+            ${g.dossiers.map(d=>{
+              const montant = Number(d.facture||d.devis||0);
+              const typeIcon = d._type==="vitrage" ? "🪟" : "🔩";
+              const typeLabel = d._type==="vitrage" ? "Vitrage" : "Mécanique";
+              const statColor = d.statut==="Facturé"||d.statut==="Terminé" ? "#34d399" : d.statut==="En cours" ? "#f59e0b" : "#64748b";
+              const docsLies = documents.filter(doc=>doc.dossierNumero===d.numero);
+              return `<tr style="border-bottom:1px solid #1e293b;">
+                <td style="white-space:nowrap;">${escHtml(d.dateCreation||d.date||"—")}</td>
+                <td>${typeIcon} ${typeLabel}</td>
+                <td><b style="color:#38bdf8;">${escHtml(d.numero||"")}</b></td>
+                <td>${escHtml(d.sinistre||d.typePanne||d.vitrage||d.titre||"—")}</td>
+                <td><span style="color:${statColor};font-weight:bold;">${escHtml(d.statut||"—")}</span></td>
+                <td style="text-align:right;">${montant>0?montant.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":"—"}</td>
+                <td style="font-size:11px;color:#64748b;">${docsLies.map(doc=>`<span style="background:#1e293b;padding:1px 5px;border-radius:3px;">${escHtml(doc.id)}</span>`).join(" ")||"—"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+      ${docsVehicule.length > 0 ? `
+      <div style="margin-top:10px;padding:10px;background:#0f172a;border-radius:8px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:6px;">📄 Documents liés :</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${docsVehicule.map(doc=>`
+            <div style="background:#1e293b;border-radius:6px;padding:6px 10px;font-size:12px;">
+              <span style="color:#38bdf8;font-weight:bold;">${escHtml(doc.id)}</span>
+              <span style="color:#64748b;"> — ${doc.totalTTC.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</span>
+              ${doc.type==="facture"?`<span style="color:${doc.statutReglement==="Réglé"?"#34d399":doc.statutReglement==="Partiel"?"#f59e0b":"#f87171"};margin-left:4px;">${doc.statutReglement==="Réglé"?"✅":"❌"}</span>`:""}
+            </div>`).join("")}
+        </div>
+      </div>` : ""}
+    </div>`;
+  }).join("");
 }
+
 
 /* =====================================
    BADGES STATUT
@@ -1664,8 +1732,24 @@ function ouvrirDossier(index){
       <p>${escHtml(d.observation||"Aucune observation")}</p>
 
       <h3>💰 Financier</h3>
-      <p><b>Montant devis :</b> ${escHtml(String(d.devis||0))} €</p>
-      <p><b>Montant facture :</b> ${escHtml(String(d.facture||0))} €</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid #38bdf8;">
+          <div style="font-size:11px;color:#64748b;">Devis</div>
+          <div style="font-weight:bold;color:#38bdf8;">${d.devis ? Number(d.devis).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid #a78bfa;">
+          <div style="font-size:11px;color:#64748b;">Facture</div>
+          <div style="font-weight:bold;color:#a78bfa;">${d.facture ? Number(d.facture).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;">Encaissé</div>
+          <div style="font-weight:bold;color:#34d399;">${d.montantEncaisse ? Number(d.montantEncaisse).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid ${(d.statutPaiement||"Non réglé")==="Réglé"?"#34d399":(d.statutPaiement)==="Partiel"?"#f59e0b":"#f87171"};">
+          <div style="font-size:11px;color:#64748b;">Statut</div>
+          <div style="font-weight:bold;color:${(d.statutPaiement||"Non réglé")==="Réglé"?"#34d399":(d.statutPaiement)==="Partiel"?"#f59e0b":"#f87171"};">${d.statutPaiement||"Non réglé"}</div>
+        </div>
+      </div>
 
       <h3>📌 Statut</h3>
       <p><span class="badge badge-${getBadgeClass(d.statut)}">${escHtml(d.statut)}</span></p>
@@ -1683,6 +1767,7 @@ function ouvrirDossier(index){
         ${d.modifiedBy ? " — par <b>" + escHtml(d.modifiedBy) + "</b>" : ""}
       </div>` : ""}
       <br>
+      <button onclick="ouvrirFinancierDossier(${index})" style="background:#16a34a;font-size:14px;padding:10px 18px;">💰 Devis / Facture / Encaissement</button>
       <button onclick="imprimerDossier()">🖨 Imprimer</button>
       <button onclick="genererDeclaration(${index})">📋 Déclaration</button>
       <button onclick="emailAssurance(${index})">📧 Email assurance</button>
@@ -2043,11 +2128,20 @@ ${entreprise.nom||"DA-Gestion"}`;
 
 function sauvegarderEntreprise(){
   const g = id => { const el=document.getElementById(id); return el ? el.value.trim() : ""; };
-  entreprise.nom       = g("societeNom");
-  entreprise.adresse   = g("societeAdresse");
-  entreprise.telephone = g("societeTelephone");
-  entreprise.email     = g("societeEmail");
-  entreprise.siret     = g("societeSiret");
+  entreprise.nom             = g("societeNom");
+  entreprise.adresse         = g("societeAdresse");
+  entreprise.telephone       = g("societeTelephone");
+  entreprise.email           = g("societeEmail");
+  entreprise.siret           = g("societeSiret");
+  entreprise.naf             = g("societeNaf");
+  entreprise.tva             = g("societeTva");
+  entreprise.formeJuridique  = g("societeFormeJuridique");
+  entreprise.capital         = g("societeCapital");
+  entreprise.rcs             = g("societeRcs");
+  entreprise.cgu             = g("societeCgu");
+  entreprise.penalites       = g("societePenalites");
+  entreprise.iban            = g("societeIban");
+  entreprise.bic             = g("societeBic");
 
   const logoInput = document.getElementById("societeLogo");
   if(logoInput && logoInput.files && logoInput.files.length > 0){
@@ -2068,11 +2162,20 @@ function sauvegarderEntreprise(){
 
 function chargerEntreprise(){
   const set = (id, val) => { const el=document.getElementById(id); if(el) el.value=val; };
-  set("societeNom",       entreprise.nom||"");
-  set("societeAdresse",   entreprise.adresse||"");
-  set("societeTelephone", entreprise.telephone||"");
-  set("societeEmail",     entreprise.email||"");
-  set("societeSiret",     entreprise.siret||"");
+  set("societeNom",            entreprise.nom||"");
+  set("societeAdresse",        entreprise.adresse||"");
+  set("societeTelephone",      entreprise.telephone||"");
+  set("societeEmail",          entreprise.email||"");
+  set("societeSiret",          entreprise.siret||"");
+  set("societeNaf",            entreprise.naf||"");
+  set("societeTva",            entreprise.tva||"");
+  set("societeFormeJuridique", entreprise.formeJuridique||"");
+  set("societeCapital",        entreprise.capital||"");
+  set("societeRcs",            entreprise.rcs||"");
+  set("societeCgu",            entreprise.cgu||"30 jours net");
+  set("societePenalites",      entreprise.penalites||"3× taux légal en vigueur");
+  set("societeIban",           entreprise.iban||"");
+  set("societeBic",            entreprise.bic||"");
   afficherEntreprise();
 }
 
@@ -2263,7 +2366,9 @@ function ajouterRendezVous(){
 
   if(!date){ toast("Date obligatoire", "error"); return; }
 
-  rendezVous.push({ date, heure, client, vehicule, immat, motif, statut });
+  const telephone = document.getElementById("telephoneRdv")?.value.trim()||"";
+  rendezVous.push({ date, heure, client, telephone, vehicule, immat, motif, statut });
+  document.getElementById("telephoneRdv") && (document.getElementById("telephoneRdv").value="");
   saveData();
   renderRendezVous();
   renderRdvDuJour();
@@ -2294,7 +2399,8 @@ function renderRendezVous(){
         </select>
       </td>
       <td style="white-space:nowrap;">
-        <button onclick="ouvrirGoogleAgenda(${rdv._i})" style="padding:4px 8px;font-size:12px;background:#16a34a;">📅 Google</button>
+        <button onclick="ouvrirGoogleAgenda(${rdv._i})" style="padding:4px 8px;font-size:12px;background:#16a34a;">📅</button>
+        ${rdv.telephone ? `<button onclick="envoyerSMSRdv(${rdv._i})" style="padding:4px 8px;font-size:12px;background:#0891b2;">📱</button>` : ""}
         <button onclick="modifierRendezVous(${rdv._i})" style="padding:4px 8px;font-size:12px;">✏️</button>
         <button class="delete-btn" onclick="supprimerRendezVous(${rdv._i})" style="padding:4px 8px;font-size:12px;">🗑</button>
       </td>
@@ -3176,7 +3282,23 @@ function _genPdf(savedDoc){
   doc.setFontSize(13);
   doc.text("Total TTC :", 140, y); doc.text(totalTTC.toFixed(2)+" €", 185, y, {align:"right"});
 
-  doc.save((type==="devis"?"Devis":"Facture")+"_"+(dossier?dossier.numero:"")+"_"+Date.now()+".pdf");
+  // ── Mentions légales obligatoires en pied de page ──
+  const pageH = doc.internal.pageSize.height;
+  doc.setFontSize(6.5);
+  doc.setTextColor(130,130,130);
+  let my = pageH - 26;
+  const mLigne = (txt) => { if(txt) { doc.text(String(txt), 14, my); my += 3.8; } };
+
+  const siretClean = (entreprise.siret||"").replace(/[^0-9]/g,"");
+  if(siretClean)       mLigne("SIRET : "+siretClean+(entreprise.naf?" — NAF : "+entreprise.naf:"")+(entreprise.formeJuridique?" — "+entreprise.formeJuridique:""));
+  if(entreprise.tva)   mLigne("N° TVA intracommunautaire : "+entreprise.tva);
+  if(entreprise.rcs)   mLigne(entreprise.rcs);
+  if(entreprise.cgu)   mLigne("Conditions de paiement : "+entreprise.cgu);
+  if(entreprise.penalites) mLigne("Pénalités de retard : "+entreprise.penalites+" — Indemnité forfaitaire de recouvrement : 40 €");
+  if(entreprise.iban)  mLigne("IBAN : "+entreprise.iban+(entreprise.bic?" — BIC : "+entreprise.bic:""));
+  if(type==="facture") mLigne("Facture conforme à l'art. 289 du CGI. TVA acquittée sur les débits.");
+
+  doc.save((type==="devis"?"Devis":type==="or"?"OR":"Facture")+"_"+(dossier?dossier.numero:"")+"_"+Date.now()+".pdf");
 }
 
 /* =====================================
@@ -3706,20 +3828,35 @@ function ouvrirDossierMecanique(index){
       <p><b>Créé le :</b> ${escHtml(d.dateCreation||"—")}</p>
 
       <h3>💶 Montants</h3>
-      <p><b>Devis :</b> ${d.devis ? Number(d.devis).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</p>
-      <p><b>Facture :</b> ${d.facture ? Number(d.facture).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid #38bdf8;">
+          <div style="font-size:11px;color:#64748b;">Devis</div>
+          <div style="font-weight:bold;color:#38bdf8;">${d.devis ? Number(d.devis).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid #a78bfa;">
+          <div style="font-size:11px;color:#64748b;">Facture</div>
+          <div style="font-weight:bold;color:#a78bfa;">${d.facture ? Number(d.facture).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;">Encaissé</div>
+          <div style="font-weight:bold;color:#34d399;">${d.montantEncaisse ? Number(d.montantEncaisse).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €" : "—"}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:8px 12px;border-top:2px solid ${(d.statutPaiement||"Non réglé")==="Réglé"?"#34d399":(d.statutPaiement)==="Partiel"?"#f59e0b":"#f87171"};">
+          <div style="font-size:11px;color:#64748b;">Statut</div>
+          <div style="font-weight:bold;color:${(d.statutPaiement||"Non réglé")==="Réglé"?"#34d399":(d.statutPaiement)==="Partiel"?"#f59e0b":"#f87171"};">${d.statutPaiement||"Non réglé"}</div>
+        </div>
+      </div>
 
       ${renderReparationsMecaniqueHtml(d)}
 
       ${d.observation ? `<h3>📝 Observations</h3><p style="white-space:pre-line;">${escHtml(d.observation)}</p>` : ""}
 
       <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button onclick="ouvrirFinancierMecanique(${index})" style="background:#16a34a;font-size:14px;padding:10px 18px;">💰 Devis / Facture / Encaissement</button>
         <button onclick="modifierDossierMecanique(${index})">✏ Modifier</button>
         <button onclick="ajouterReparationOrdre(${index})" class="btn-success">➕ Réparation</button>
         <button onclick="imprimerOrdreMission(${index})" style="background:#7c3aed;">🖨 Ordre réparation</button>
-        <button onclick="imprimerDocumentMecanique(${index}, 'devis')" style="background:#0891b2;">🖨 Devis</button>
-        <button onclick="imprimerDocumentMecanique(${index}, 'facture')" style="background:#0f766e;">🖨 Facture</button>
-        <button onclick="envoyerSmsVehiculeTermine(${index})" style="background:#0891b2;">📱 SMS véhicule prêt</button>
+        <button onclick="envoyerSmsVehiculeTermine(${index})" style="background:#0891b2;">📱 SMS</button>
         <button onclick="document.getElementById('detailMecanique').innerHTML=''" style="background:#334155;">✖ Fermer</button>
         <button class="delete-btn" onclick="supprimerDossierMecanique(${index})">🗑 Supprimer</button>
       </div>
@@ -4284,38 +4421,99 @@ function ficheClientComplet(index){
 ───────────────────────────────────────────────────*/
 
 function historiqueVehicule(){
-  const immat = (document.getElementById("rechercheHistorique")?.value||"").trim().toLowerCase();
-  const zone  = document.getElementById("historiqueVehicule");
+  const recherche = (document.getElementById("rechercheHistorique")?.value||"").trim().toLowerCase();
+  const zone = document.getElementById("historiqueVehicule");
   if(!zone) return;
-  if(immat.length < 2){ zone.innerHTML=""; return; }
-  const mecs = typeof dossiersMecanique !== "undefined" ? dossiersMecanique : [];
-  const dosVit = dossiers.filter(d=>(d.immat||"").toLowerCase().includes(immat));
-  const dosMec = mecs.filter(d=>(d.immat||"").toLowerCase().includes(immat));
-  if(!dosVit.length && !dosMec.length){ zone.innerHTML=`<div class="card"><p style="color:var(--muted);">Aucun dossier trouvé pour "${escHtml(immat)}"</p></div>`; return; }
+  if(!recherche){ zone.innerHTML=""; return; }
 
-  const totalCA = [...dosVit,...dosMec].reduce((a,d)=>a+Number(d.facture||d.devis||0),0);
-  zone.innerHTML = `
-    <div class="card" style="margin-bottom:16px;">
-      <h2 style="color:#38bdf8;margin-bottom:12px;">🚗 Historique — ${escHtml((dosVit[0]||dosMec[0])?.vehicule||"")} <span style="color:var(--muted);font-size:14px;">${escHtml(immat.toUpperCase())}</span></h2>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
-        <span style="background:#1e293b;padding:8px 14px;border-radius:8px;font-size:13px;">🪟 ${dosVit.length} intervention${dosVit.length>1?"s":""} vitrage</span>
-        <span style="background:#1e293b;padding:8px 14px;border-radius:8px;font-size:13px;">🔩 ${dosMec.length} intervention${dosMec.length>1?"s":""} mécanique</span>
-        <span style="background:#1e293b;padding:8px 14px;border-radius:8px;font-size:13px;color:#38bdf8;">💶 CA total : ${totalCA.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</span>
+  // Chercher dans dossiers vitrage + mécanique + documents
+  const dossiersV = dossiers.filter(d =>
+    (d.immat||"").toLowerCase().includes(recherche) ||
+    (d.client||"").toLowerCase().includes(recherche) ||
+    (d.vehicule||"").toLowerCase().includes(recherche) ||
+    (d.marque||"").toLowerCase().includes(recherche)
+  );
+  const dossiersM = (typeof dossiersMecanique !== "undefined" ? dossiersMecanique : []).filter(d =>
+    (d.immat||"").toLowerCase().includes(recherche) ||
+    (d.client||"").toLowerCase().includes(recherche) ||
+    (d.vehicule||"").toLowerCase().includes(recherche)
+  );
+
+  if(dossiersV.length === 0 && dossiersM.length === 0){
+    zone.innerHTML = `<div class="card"><p style="color:#64748b;">Aucun résultat pour "<b>${escHtml(recherche)}</b>"</p></div>`;
+    return;
+  }
+
+  // Regrouper par immatriculation
+  const groupes = {};
+  [...dossiersV.map(d=>({...d,_type:"vitrage"})), ...dossiersM.map(d=>({...d,_type:"mecanique"}))].forEach(d=>{
+    const key = (d.immat||d.vehicule||"Inconnu").toUpperCase();
+    if(!groupes[key]) groupes[key] = { immat:key, client:d.client||"", vehicule:d.vehicule||d.marque||"", dossiers:[] };
+    groupes[key].dossiers.push(d);
+  });
+
+  zone.innerHTML = Object.values(groupes).map(g => {
+    const totalCA = g.dossiers.reduce((a,d)=>a+Number(d.facture||d.devis||0),0);
+    const dernierD = g.dossiers.sort((a,b)=>new Date(b.dateCreation||b.date||0)-new Date(a.dateCreation||a.date||0))[0];
+    const docsVehicule = documents.filter(doc =>
+      g.dossiers.some(d=>d.numero===doc.dossierNumero)
+    );
+
+    return `<div class="card" style="border-left:4px solid #38bdf8;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:20px;font-weight:bold;color:#38bdf8;">${escHtml(g.immat)}</span>
+            <span style="font-size:13px;color:#94a3b8;">${escHtml(g.vehicule)}</span>
+          </div>
+          <div style="font-size:13px;color:#64748b;margin-top:2px;">👤 ${escHtml(g.client)} — ${g.dossiers.length} intervention${g.dossiers.length>1?"s":""} — CA total : <b style="color:#34d399;">${totalCA.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</b></div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:#64748b;">
+          Dernière intervention : ${dernierD.dateCreation||dernierD.date||"—"}
+        </div>
       </div>
-      ${dosVit.length?`
-      <h3 style="color:#2563eb;margin-bottom:8px;">🪟 Vitrage</h3>
-      <div class="table-wrapper" style="margin-bottom:12px;"><table style="font-size:12px;">
-        <thead><tr><th>N°</th><th>Client</th><th>Vitrage</th><th>Date</th><th>Assurance</th><th>Montant</th><th>Statut</th></tr></thead>
-        <tbody>${dosVit.map(d=>`<tr><td><b>${escHtml(d.numero)}</b></td><td>${escHtml(d.client)}</td><td>${escHtml(d.vitrage||"—")}</td><td>${escHtml(d.dateCreation||"—")}</td><td>${escHtml(d.assurance||"—")}</td><td>${d.facture?Number(d.facture).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":"—"}</td><td>${escHtml(d.statut)}</td></tr>`).join("")}</tbody>
-      </table></div>`:""}
-      ${dosMec.length?`
-      <h3 style="color:#16a34a;margin-bottom:8px;">🔩 Mécanique</h3>
-      <div class="table-wrapper"><table style="font-size:12px;">
-        <thead><tr><th>N°</th><th>Client</th><th>Intervention</th><th>Entrée</th><th>Km</th><th>Montant</th><th>Statut</th></tr></thead>
-        <tbody>${dosMec.map(d=>`<tr><td><b>${escHtml(d.numero)}</b></td><td>${escHtml(d.client)}</td><td>${escHtml(d.typePanne||"—")}</td><td>${escHtml(d.dateEntree||"—")}</td><td>${escHtml(d.kilometrage||"—")}</td><td>${d.facture?Number(d.facture).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":d.devis?Number(d.devis).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":"—"}</td><td>${escHtml(d.statut)}</td></tr>`).join("")}</tbody>
-      </table></div>`:""}
+
+      <div class="table-wrapper">
+        <table style="font-size:12px;">
+          <thead><tr style="background:#0f172a;">
+            <th>Date</th><th>Type</th><th>N° Dossier</th><th>Intervention</th><th>Statut</th><th>Montant</th><th>Documents</th>
+          </tr></thead>
+          <tbody>
+            ${g.dossiers.map(d=>{
+              const montant = Number(d.facture||d.devis||0);
+              const typeIcon = d._type==="vitrage" ? "🪟" : "🔩";
+              const typeLabel = d._type==="vitrage" ? "Vitrage" : "Mécanique";
+              const statColor = d.statut==="Facturé"||d.statut==="Terminé" ? "#34d399" : d.statut==="En cours" ? "#f59e0b" : "#64748b";
+              const docsLies = documents.filter(doc=>doc.dossierNumero===d.numero);
+              return `<tr style="border-bottom:1px solid #1e293b;">
+                <td style="white-space:nowrap;">${escHtml(d.dateCreation||d.date||"—")}</td>
+                <td>${typeIcon} ${typeLabel}</td>
+                <td><b style="color:#38bdf8;">${escHtml(d.numero||"")}</b></td>
+                <td>${escHtml(d.sinistre||d.typePanne||d.vitrage||d.titre||"—")}</td>
+                <td><span style="color:${statColor};font-weight:bold;">${escHtml(d.statut||"—")}</span></td>
+                <td style="text-align:right;">${montant>0?montant.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":"—"}</td>
+                <td style="font-size:11px;color:#64748b;">${docsLies.map(doc=>`<span style="background:#1e293b;padding:1px 5px;border-radius:3px;">${escHtml(doc.id)}</span>`).join(" ")||"—"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+      ${docsVehicule.length > 0 ? `
+      <div style="margin-top:10px;padding:10px;background:#0f172a;border-radius:8px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:6px;">📄 Documents liés :</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${docsVehicule.map(doc=>`
+            <div style="background:#1e293b;border-radius:6px;padding:6px 10px;font-size:12px;">
+              <span style="color:#38bdf8;font-weight:bold;">${escHtml(doc.id)}</span>
+              <span style="color:#64748b;"> — ${doc.totalTTC.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</span>
+              ${doc.type==="facture"?`<span style="color:${doc.statutReglement==="Réglé"?"#34d399":doc.statutReglement==="Partiel"?"#f59e0b":"#f87171"};margin-left:4px;">${doc.statutReglement==="Réglé"?"✅":"❌"}</span>`:""}
+            </div>`).join("")}
+        </div>
+      </div>` : ""}
     </div>`;
+  }).join("");
 }
+
 
 /* ─────────────────────────────────────────────────
    5. CALENDRIER MENSUEL AGENDA
@@ -6774,4 +6972,1643 @@ function majAffichageMarge(){
       <span style="font-size:13px;color:#94a3b8;">Coût achat : <b style="color:#f87171;">${coutAchat.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</b></span>
       <span style="font-size:13px;color:#94a3b8;">Marge : <b style="color:${color};font-size:15px;">${margeHT.toLocaleString("fr-FR",{minimumFractionDigits:2})} € (${margePct.toFixed(1)}%)</b></span>
     </div>` : "";
+}
+
+/* =====================================================================
+   TABLEAU DE BORD ENRICHI — KPIs + Graphique 12 mois
+===================================================================== */
+
+function majDashboardKPIs(){
+  const now  = new Date();
+  const moisN = now.getMonth();
+  const anneeN= now.getFullYear();
+
+  // ── Règlements ──
+  const factures    = documents.filter(d=>d.type==="facture");
+  const totalFact   = factures.reduce((a,d)=>a+(d.totalTTC||0),0);
+  const totalRegle  = factures.filter(d=>d.statutReglement==="Réglé").reduce((a,d)=>a+(d.totalTTC||0),0);
+  const totalNonRegle = factures.filter(d=>d.statutReglement==="Non réglé").reduce((a,d)=>a+(d.totalTTC||0),0);
+  const totalPartiel  = factures.filter(d=>d.statutReglement==="Partiel").reduce((a,d)=>a+(d.totalTTC||0),0);
+  const fmt = v => v.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  const zoneRegl = document.getElementById("dashReglements");
+  if(zoneRegl) zoneRegl.innerHTML = `
+    <div style="margin-top:4px;">
+      <div style="display:flex;justify-content:space-between;"><span>✅ Réglé</span><b style="color:#34d399;">${fmt(totalRegle)}</b></div>
+      <div style="display:flex;justify-content:space-between;"><span>⚠️ Partiel</span><b style="color:#f59e0b;">${fmt(totalPartiel)}</b></div>
+      <div style="display:flex;justify-content:space-between;"><span>❌ Impayé</span><b style="color:#f87171;">${fmt(totalNonRegle)}</b></div>
+      <div style="margin-top:6px;background:#1e293b;border-radius:6px;height:6px;overflow:hidden;">
+        <div style="background:#34d399;height:100%;width:${totalFact>0?(totalRegle/totalFact*100).toFixed(1):0}%;"></div>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-top:3px;">${totalFact>0?(totalRegle/totalFact*100).toFixed(1):0}% encaissé</div>
+    </div>`;
+
+  // ── Marges ──
+  const facturesAvecMarge = factures.filter(d=>d.margeHT!==undefined && d.coutAchat>0);
+  const totalMargeHT  = facturesAvecMarge.reduce((a,d)=>a+(d.margeHT||0),0);
+  const totalVenteHT  = facturesAvecMarge.reduce((a,d)=>a+(d.totalHT||0),0);
+  const margeMoy      = facturesAvecMarge.length>0 ? (totalMargeHT/totalVenteHT*100) : 0;
+  const meilleureM    = facturesAvecMarge.length>0 ? Math.max(...facturesAvecMarge.map(d=>d.margePct||0)) : 0;
+
+  const zoneMarges = document.getElementById("dashMarges");
+  if(zoneMarges) zoneMarges.innerHTML = facturesAvecMarge.length === 0
+    ? `<p style="color:#475569;font-size:12px;">Renseignez le coût d'achat dans vos factures pour voir les marges.</p>`
+    : `<div>
+        <div style="display:flex;justify-content:space-between;"><span>Marge brute totale</span><b style="color:#34d399;">${fmt(totalMargeHT)}</b></div>
+        <div style="display:flex;justify-content:space-between;"><span>Taux marge moyen</span><b style="color:${margeMoy>=40?"#34d399":margeMoy>=20?"#f59e0b":"#f87171"};">${margeMoy.toFixed(1)}%</b></div>
+        <div style="display:flex;justify-content:space-between;"><span>Meilleure marge</span><b style="color:#38bdf8;">${meilleureM.toFixed(1)}%</b></div>
+        <div style="display:flex;justify-content:space-between;"><span>Factures analysées</span><b>${facturesAvecMarge.length}</b></div>
+      </div>`;
+
+  // ── Taux transformation devis → facture ──
+  const nbDevis    = documents.filter(d=>d.type==="devis").length;
+  const nbFactures = factures.length;
+  const tauxTransfo= nbDevis+nbFactures>0 ? (nbFactures/(nbDevis+nbFactures)*100) : 0;
+  const docsOR     = documents.filter(d=>d.type==="or").length;
+
+  const zoneTransfo = document.getElementById("dashTransformation");
+  if(zoneTransfo) zoneTransfo.innerHTML = `<div>
+    <div style="display:flex;justify-content:space-between;"><span>Devis émis</span><b>${nbDevis}</b></div>
+    <div style="display:flex;justify-content:space-between;"><span>Factures émises</span><b style="color:#34d399;">${nbFactures}</b></div>
+    <div style="display:flex;justify-content:space-between;"><span>Ordres de réparation</span><b style="color:#a78bfa;">${docsOR}</b></div>
+    <div style="margin-top:6px;background:#1e293b;border-radius:6px;height:6px;overflow:hidden;">
+      <div style="background:#f59e0b;height:100%;width:${tauxTransfo.toFixed(1)}%;"></div>
+    </div>
+    <div style="font-size:11px;color:#64748b;margin-top:3px;">Taux : <b style="color:#f59e0b;">${tauxTransfo.toFixed(1)}%</b></div>
+  </div>`;
+
+  // ── Ce mois-ci ──
+  const tousDossiers = [...dossiers, ...(typeof dossiersMecanique!=="undefined"?dossiersMecanique:[])];
+  const dossMois = tousDossiers.filter(d=>{
+    const dt = new Date(d.dateCreation||d.date||0);
+    return dt.getMonth()===moisN && dt.getFullYear()===anneeN;
+  });
+  const caMoisCourant = dossMois.reduce((a,d)=>a+Number(d.facture||0),0);
+  const factMois = factures.filter(d=>{ const dt=new Date(d.date||0); return dt.getMonth()===moisN && dt.getFullYear()===anneeN; });
+  const caMoisFacture = factMois.reduce((a,d)=>a+(d.totalTTC||0),0);
+  const rdvMois = rendezVous.filter(r=>{ const dt=new Date(r.date||0); return dt.getMonth()===moisN && dt.getFullYear()===anneeN; });
+
+  const nomMois = now.toLocaleDateString("fr-FR",{month:"long"});
+  const zoneMois = document.getElementById("dashMoisEnCours");
+  if(zoneMois) zoneMois.innerHTML = `<div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:4px;text-transform:capitalize;">${nomMois} ${anneeN}</div>
+    <div style="display:flex;justify-content:space-between;"><span>Dossiers ouverts</span><b style="color:#38bdf8;">${dossMois.length}</b></div>
+    <div style="display:flex;justify-content:space-between;"><span>CA facturé</span><b style="color:#34d399;">${fmt(caMoisFacture)}</b></div>
+    <div style="display:flex;justify-content:space-between;"><span>RDV planifiés</span><b>${rdvMois.length}</b></div>
+  </div>`;
+
+  // ── Graphique 12 mois vs N-1 ──
+  renderGraphiqueCA12Mois();
+}
+
+function renderGraphiqueCA12Mois(){
+  const canvas = document.getElementById("graphiqueCA12Mois");
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const now  = new Date();
+
+  // Construire 12 mois
+  const mois = [];
+  for(let i=11; i>=0; i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    mois.push({ label: d.toLocaleDateString("fr-FR",{month:"short"}), annee:d.getFullYear(), mois:d.getMonth() });
+  }
+
+  const getCAmois = (annee, moisIdx) => {
+    const tousDoss = [...dossiers, ...(typeof dossiersMecanique!=="undefined"?dossiersMecanique:[])];
+    const caD = tousDoss.filter(d=>{
+      const dt=new Date(d.dateCreation||d.date||0);
+      return dt.getFullYear()===annee && dt.getMonth()===moisIdx;
+    }).reduce((a,d)=>a+Number(d.facture||0),0);
+    const caF = documents.filter(d=>{
+      if(d.type!=="facture") return false;
+      const dt=new Date(d.date||0);
+      return dt.getFullYear()===annee && dt.getMonth()===moisIdx;
+    }).reduce((a,d)=>a+(d.totalTTC||0),0);
+    return Math.max(caD, caF);
+  };
+
+  const dataN  = mois.map(m => getCAmois(m.annee, m.mois));
+  const dataN1 = mois.map(m => getCAmois(m.annee-1, m.mois));
+  const maxVal = Math.max(...dataN, ...dataN1, 1);
+
+  const w=canvas.width, h=canvas.height;
+  const pad={top:24,right:20,bottom:36,left:56};
+  const innerW=w-pad.left-pad.right, innerH=h-pad.top-pad.bottom;
+
+  ctx.clearRect(0,0,w,h);
+
+  // Grille horizontale
+  ctx.strokeStyle="#1e293b"; ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){
+    const y=pad.top+innerH/4*i;
+    ctx.beginPath(); ctx.moveTo(pad.left,y); ctx.lineTo(w-pad.right,y); ctx.stroke();
+    // Labels axe Y
+    ctx.fillStyle="#64748b"; ctx.font="10px sans-serif"; ctx.textAlign="right";
+    ctx.fillText(((maxVal/4*(4-i))/1000).toFixed(1)+"k", pad.left-4, y+4);
+  }
+
+  const barW   = Math.floor(innerW/mois.length*0.3);
+  const gap    = Math.floor(innerW/mois.length);
+
+  // Barres N-1 (gris)
+  dataN1.forEach((val,i)=>{
+    if(val===0) return;
+    const x  = pad.left + i*gap + gap/2 - barW;
+    const bH = innerH*(val/maxVal);
+    const y  = pad.top+innerH-bH;
+    ctx.fillStyle="#334155";
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x,y,barW,bH,2) : ctx.rect(x,y,barW,bH);
+    ctx.fill();
+  });
+
+  // Barres N (couleur)
+  dataN.forEach((val,i)=>{
+    const x  = pad.left + i*gap + gap/2;
+    const bH = Math.max(innerH*(val/maxVal), val>0?2:0);
+    const y  = pad.top+innerH-bH;
+    const grad = ctx.createLinearGradient(x,y,x,pad.top+innerH);
+    grad.addColorStop(0,"#38bdf8"); grad.addColorStop(1,"#0284c722");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x,y,barW,bH,2) : ctx.rect(x,y,barW,bH);
+    ctx.fill();
+    // Valeur
+    if(val>0){
+      ctx.fillStyle="#f1f5f9"; ctx.font="bold 9px sans-serif"; ctx.textAlign="center";
+      ctx.fillText((val/1000).toFixed(1)+"k", x+barW/2, y-3);
+    }
+    // Label mois
+    ctx.fillStyle="#64748b"; ctx.font="10px sans-serif"; ctx.textAlign="center";
+    ctx.fillText(mois[i].label, pad.left+i*gap+gap/2, h-pad.bottom+14);
+  });
+
+  // Légende
+  const legend = document.getElementById("dashLegendCA");
+  if(legend) legend.innerHTML = `
+    <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#38bdf8;border-radius:2px;display:inline-block;"></span> ${now.getFullYear()}</span>
+    <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#334155;border-radius:2px;display:inline-block;"></span> ${now.getFullYear()-1}</span>`;
+}
+
+// Brancher dans majDashboard
+const _origMajDashboard = majDashboard;
+function majDashboard(){
+  _origMajDashboard();
+  setTimeout(()=>{ majDashboardKPIs(); }, 50);
+}
+
+/* =====================================================================
+   MODULE SMS / RAPPELS CLIENTS
+===================================================================== */
+
+let _signatureData = ""; // stockage temporaire signature courante
+
+const SMS_MODELES = {
+  rappelRdv: (rdv, garage) =>
+    `Bonjour ${rdv.client||""},\n\nRappel de votre RDV chez ${garage||"le garage"} le ${rdv.date ? new Date(rdv.date+"T00:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) : "—"} à ${rdv.heure||"—"}.\n\nVéhicule : ${rdv.vehicule||""} ${rdv.immat||""}\nMotif : ${rdv.motif||""}\n\nÀ bientôt !`,
+
+  vehiculePret: (rdv, garage) =>
+    `Bonjour ${rdv.client||""},\n\nVotre véhicule ${rdv.vehicule||""} ${rdv.immat||""} est prêt. Vous pouvez venir le récupérer chez ${garage||"le garage"}.\n\nN'hésitez pas à nous appeler pour tout renseignement.\n\nCordialement`,
+
+  devisAccepte: (doc, garage) =>
+    `Bonjour,\n\nVotre devis ${doc?.id||""} d'un montant de ${doc?.totalTTC?.toLocaleString("fr-FR",{minimumFractionDigits:2})||"0,00"} € TTC a bien été enregistré.\n\nNous vous contacterons pour convenir d'un rendez-vous.\n\nCordialement, ${garage||"le garage"}`,
+
+  relanceImpaye: (doc, garage) =>
+    `Bonjour,\n\nSauf erreur de notre part, la facture ${doc?.id||""} du ${doc?.date||"—"} d'un montant de ${doc?.totalTTC?.toLocaleString("fr-FR",{minimumFractionDigits:2})||"0,00"} € TTC reste impayée.\n\nMerci de bien vouloir régulariser votre situation.\n\nCordialement, ${garage||"le garage"}`,
+};
+
+function envoyerSMSRdv(index){
+  const rdv = rendezVous[index];
+  if(!rdv) return;
+  const garage = entreprise?.nom || "Garage GlassMéca";
+  const message = SMS_MODELES.rappelRdv(rdv, garage);
+  const tel = rdv.telephone?.replace(/\s/g,"") || "";
+  if(!tel){ toast("Numéro de téléphone manquant pour ce RDV","error"); return; }
+  window.open(`sms:${tel}?body=${encodeURIComponent(message)}`);
+}
+
+function ouvrirSMSManager(){
+  const garage = entreprise?.nom || "Garage GlassMéca";
+  const rdvAvecTel = rendezVous.filter(r=>r.telephone).map((r,i)=>({...r,_i:rendezVous.indexOf(r)}));
+  const factImpayees = documents.filter(d=>d.type==="facture" && d.statutReglement==="Non réglé");
+
+  ouvrirModal("📱 SMS / Messages clients",
+    `<div style="display:flex;flex-direction:column;gap:16px;">
+
+      <!-- Rappels RDV -->
+      <div>
+        <h3 style="color:#38bdf8;margin-bottom:8px;">📅 Rappels de rendez-vous</h3>
+        ${rdvAvecTel.length === 0
+          ? `<p style="color:#64748b;font-size:13px;">Aucun RDV avec numéro de téléphone. Ajoutez un téléphone lors de la création du RDV.</p>`
+          : `<div style="display:flex;flex-direction:column;gap:8px;">
+              ${rdvAvecTel.slice(0,5).map(rdv=>`
+                <div style="background:#0f172a;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                  <div>
+                    <b style="color:#f1f5f9;">${escHtml(rdv.client)}</b>
+                    <span style="color:#64748b;font-size:12px;"> — ${escHtml(rdv.date)} ${escHtml(rdv.heure||"")} — ${escHtml(rdv.telephone)}</span>
+                  </div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button onclick="envoyerSMSRdv(${rdv._i})" style="background:#0891b2;font-size:12px;padding:5px 10px;">📱 Rappel RDV</button>
+                    <button onclick="envoyerSMSVehiculePret(${rdv._i})" style="background:#16a34a;font-size:12px;padding:5px 10px;">🚗 Véhicule prêt</button>
+                  </div>
+                </div>`).join("")}
+            </div>`}
+      </div>
+
+      <!-- Relances impayées -->
+      <div>
+        <h3 style="color:#f87171;margin-bottom:8px;">❌ Relances factures impayées</h3>
+        ${factImpayees.length === 0
+          ? `<p style="color:#64748b;font-size:13px;">Aucune facture impayée. ✅</p>`
+          : `<div style="display:flex;flex-direction:column;gap:8px;">
+              ${factImpayees.slice(0,5).map((doc,i)=>{
+                const idx = documents.indexOf(doc);
+                return `<div style="background:#0f172a;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                  <div>
+                    <b style="color:#f87171;">${escHtml(doc.id)}</b>
+                    <span style="color:#64748b;font-size:12px;"> — ${escHtml(doc.titre||"—")} — <b>${doc.totalTTC.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</b></span>
+                  </div>
+                  <button onclick="envoyerSMSRelance(${idx})" style="background:#dc2626;font-size:12px;padding:5px 10px;">📱 Relance SMS</button>
+                </div>`;
+              }).join("")}
+            </div>`}
+      </div>
+
+      <!-- SMS personnalisé -->
+      <div>
+        <h3 style="color:#a78bfa;margin-bottom:8px;">✏️ SMS personnalisé</h3>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <input type="tel" id="smsTel" placeholder="📱 Numéro de téléphone" style="width:100%;box-sizing:border-box;">
+          <textarea id="smsMessage" rows="4" placeholder="Votre message..." style="width:100%;box-sizing:border-box;resize:vertical;font-size:13px;">${SMS_MODELES.rappelRdv({client:"[Client]",date:"",heure:"[Heure]",vehicule:"[Véhicule]",immat:"[Immat]",motif:"[Motif]"}, garage)}</textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button onclick="envoyerSMSPersonnalise()" style="background:#0891b2;">📱 Envoyer SMS</button>
+            <button onclick="copierSMSPressePapier()" style="background:#334155;">📋 Copier</button>
+          </div>
+        </div>
+      </div>
+
+    </div>`,
+    null
+  );
+  setTimeout(()=>{ const btn=document.getElementById("modalBtnOk"); if(btn) btn.style.display="none"; },50);
+}
+
+function envoyerSMSVehiculePret(index){
+  const rdv = rendezVous[index];
+  if(!rdv) return;
+  const message = SMS_MODELES.vehiculePret(rdv, entreprise?.nom||"le garage");
+  const tel = rdv.telephone?.replace(/\s/g,"") || "";
+  if(!tel){ toast("Numéro de téléphone manquant","error"); return; }
+  window.open(`sms:${tel}?body=${encodeURIComponent(message)}`);
+}
+
+function envoyerSMSRelance(index){
+  const doc = documents[index];
+  if(!doc) return;
+  // Chercher le téléphone dans le dossier rattaché
+  const dossier = doc.dossierIdx !== null ? dossiers[doc.dossierIdx] : null;
+  const client  = clients.find(c => c.nom === (dossier?.client||"").split(" ")[0]);
+  const tel     = client?.telephone?.replace(/\s/g,"") || "";
+  const message = SMS_MODELES.relanceImpaye(doc, entreprise?.nom||"le garage");
+  if(!tel){
+    // Ouvrir avec champ tel vide pour que l'utilisateur entre le numéro
+    const body = encodeURIComponent(message);
+    const ta = document.getElementById("smsMessage");
+    if(ta) ta.value = message;
+    toast("Numéro introuvable — copiez le message et envoyez manuellement","error");
+    navigator.clipboard.writeText(message).catch(()=>{});
+    return;
+  }
+  window.open(`sms:${tel}?body=${encodeURIComponent(message)}`);
+}
+
+function envoyerSMSPersonnalise(){
+  const tel = document.getElementById("smsTel")?.value.replace(/\s/g,"") || "";
+  const msg = document.getElementById("smsMessage")?.value || "";
+  if(!tel){ toast("Entrez un numéro de téléphone","error"); return; }
+  if(!msg){ toast("Entrez un message","error"); return; }
+  window.open(`sms:${tel}?body=${encodeURIComponent(msg)}`);
+}
+
+function copierSMSPressePapier(){
+  const msg = document.getElementById("smsMessage")?.value || "";
+  navigator.clipboard.writeText(msg).then(()=>toast("Message copié ✓")).catch(()=>toast("Copie non disponible","error"));
+}
+
+/* =====================================================================
+   MODULE TMO — IMPORT AUTOSSIMO
+===================================================================== */
+
+function ouvrirTMO(){
+  ouvrirModal("⏱ Importer temps Autossimo (TMO)",
+    `<div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="background:#1e293b;border-radius:8px;padding:12px;font-size:13px;color:#94a3b8;line-height:1.8;">
+        <b style="color:#a78bfa;">Comment utiliser :</b><br>
+        1. Allez sur <b>Autossimo</b> → recherchez votre véhicule<br>
+        2. Sélectionnez les opérations (ex: freins, vidange...)<br>
+        3. Copiez le tableau de résultats (Ctrl+A → Ctrl+C)<br>
+        4. Collez dans la zone ci-dessous → Cliquez <b>Importer</b>
+      </div>
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Données copiées depuis Autossimo :</label>
+        <textarea id="tmoData" rows="8" placeholder="Collez ici les données Autossimo (Ctrl+V)..." style="width:100%;box-sizing:border-box;resize:vertical;font-family:monospace;font-size:12px;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Taux MO HT (€/h)</label>
+          <input type="number" id="tmoTauxMO" value="65" step="0.5" style="width:90px;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Majoration pièces (%)</label>
+          <input type="number" id="tmoMajoPieces" value="30" step="1" style="width:90px;box-sizing:border-box;">
+        </div>
+      </div>
+      <div id="tmoApercu" style="min-height:20px;font-size:13px;"></div>
+    </div>`,
+    function(){
+      const data    = document.getElementById("tmoData")?.value.trim()||"";
+      const tauxMO  = parseFloat(document.getElementById("tmoTauxMO")?.value||"65");
+      const majo    = parseFloat(document.getElementById("tmoMajoPieces")?.value||"30")/100;
+      if(!data){ toast("Collez les données Autossimo","error"); return false; }
+      const lignes = parserAutossimo(data, tauxMO, majo);
+      if(lignes.length === 0){ toast("Aucune ligne reconnue — vérifiez le format","error"); return false; }
+      lignes.forEach(l => lignesDocument.push(l));
+      if(typeof renderLignes==="function") renderLignes();
+      toast(`${lignes.length} ligne(s) importée(s) depuis Autossimo ✓`);
+    }
+  );
+
+  // Aperçu en temps réel
+  setTimeout(()=>{
+    const ta = document.getElementById("tmoData");
+    if(ta) ta.addEventListener("input", ()=>{
+      const tauxMO = parseFloat(document.getElementById("tmoTauxMO")?.value||"65");
+      const majo   = parseFloat(document.getElementById("tmoMajoPieces")?.value||"30")/100;
+      const lignes = parserAutossimo(ta.value, tauxMO, majo);
+      const zone   = document.getElementById("tmoApercu");
+      if(!zone) return;
+      if(lignes.length === 0){ zone.innerHTML=""; return; }
+      zone.innerHTML = `<div style="background:#0f172a;border-radius:8px;padding:10px;border:1px solid #1e293b;">
+        <b style="color:#a78bfa;font-size:12px;">Aperçu — ${lignes.length} ligne(s) détectée(s) :</b>
+        <ul style="margin:6px 0 0 16px;color:#94a3b8;font-size:12px;line-height:1.8;">
+          ${lignes.map(l=>`<li>${escHtml(l.designation)} — ${l.qte} × ${l.prixHT.toFixed(2)} € HT</li>`).join("")}
+        </ul>
+        <div style="margin-top:6px;color:#34d399;font-weight:bold;font-size:13px;">
+          Total HT : ${lignes.reduce((a,l)=>a+l.qte*l.prixHT,0).toFixed(2)} €
+        </div>
+      </div>`;
+    });
+  }, 100);
+}
+
+function parserAutossimo(texte, tauxMO, majoPieces){
+  const lignes = [];
+  const lines  = texte.split("\n").map(l=>l.trim()).filter(l=>l.length>3);
+
+  lines.forEach(line => {
+    // Format typique Autossimo : "Désignation opération\t2,5\th\tPrix pièce"
+    // Ou : "Freinage avant\t1.5\t\t45.00"
+    const parts = line.split(/\t+/);
+
+    if(parts.length >= 2){
+      const designation = parts[0].replace(/\s+/g," ").trim();
+      const tempsStr    = parts[1]?.replace(",",".").trim();
+      const temps       = parseFloat(tempsStr);
+      const prixPiece   = parseFloat((parts[3]||parts[2]||"0").replace(",",".").replace(/[^\d.]/g,""))||0;
+
+      if(!designation || designation.length < 3) return;
+      if(isNaN(temps) || temps <= 0){
+        // Ligne pièce sans temps
+        if(prixPiece > 0){
+          lignes.push({ designation, qte:1, prixHT: prixPiece*(1+majoPieces), tva:20 });
+        }
+        return;
+      }
+
+      // Ligne main d'œuvre
+      lignes.push({ designation: `MO — ${designation}`, qte: temps, prixHT: tauxMO, tva:20 });
+      // Si pièce associée
+      if(prixPiece > 0){
+        lignes.push({ designation: `Pièce — ${designation}`, qte:1, prixHT: prixPiece*(1+majoPieces), tva:20 });
+      }
+      return;
+    }
+
+    // Format ligne simple : "Vidange + filtre huile — 1h30 — 45€"
+    const matchTemps = line.match(/(\d+[,.]?\d*)\s*h/i);
+    const matchPrix  = line.match(/(\d+[,.]?\d*)\s*[€e]/i);
+    const designation = line.replace(/\d+[,.]?\d*\s*h.*/i,"").replace(/\d+[,.]?\d*\s*[€e].*/i,"").trim();
+
+    if(matchTemps && designation.length > 2){
+      const temps = parseFloat(matchTemps[1].replace(",","."));
+      lignes.push({ designation: `MO — ${designation}`, qte: temps, prixHT: tauxMO, tva:20 });
+      if(matchPrix){
+        const prix = parseFloat(matchPrix[1].replace(",","."));
+        if(prix > 0) lignes.push({ designation: `Pièce — ${designation}`, qte:1, prixHT: prix*(1+majoPieces), tva:20 });
+      }
+    }
+  });
+
+  return lignes;
+}
+
+/* =====================================================================
+   MODULE SIGNATURE ÉLECTRONIQUE DEVIS
+===================================================================== */
+
+function ouvrirSignatureDevis(){
+  const type = document.getElementById("typeDocument")?.value || "devis";
+  const titre = document.getElementById("titreDocument")?.value || "";
+  const montant = document.getElementById("totalTTC")?.textContent || "0,00 €";
+
+  ouvrirModal("✍️ Signature client — Bon pour accord",
+    `<div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="background:#0f172a;border-radius:8px;padding:12px;font-size:13px;">
+        <div style="color:#64748b;margin-bottom:4px;">Document à signer :</div>
+        <div style="font-size:15px;color:#f1f5f9;font-weight:bold;">${escHtml(type==="devis"?"Devis":"Facture")} — ${escHtml(titre)}</div>
+        <div style="color:#34d399;font-size:16px;margin-top:4px;">Montant TTC : <b>${escHtml(montant)}</b></div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">Nom du signataire</label>
+        <input type="text" id="signNom" placeholder="Prénom Nom du client" style="width:100%;box-sizing:border-box;">
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:6px;">Signature (dessinez ci-dessous) :</label>
+        <div style="position:relative;border:2px dashed #334155;border-radius:8px;background:#fff;cursor:crosshair;">
+          <canvas id="canvasSignature" width="460" height="150" style="display:block;width:100%;touch-action:none;border-radius:6px;"></canvas>
+          <button onclick="effacerCanvasSignature()" style="position:absolute;top:6px;right:6px;background:#334155;color:#fff;border:none;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">✖ Effacer</button>
+        </div>
+        <p style="font-size:11px;color:#475569;margin-top:4px;">Utilisez votre souris ou votre doigt (écran tactile)</p>
+      </div>
+
+      <div style="background:#1e293b;border-radius:6px;padding:10px;font-size:11px;color:#64748b;line-height:1.7;">
+        En signant, le client accepte le devis et autorise les travaux pour le montant indiqué.<br>
+        Date : <b>${new Date().toLocaleDateString("fr-FR")}</b>
+      </div>
+    </div>`,
+    function(){
+      const canvas = document.getElementById("canvasSignature");
+      const nom    = document.getElementById("signNom")?.value.trim()||"";
+      if(!canvas){ toast("Erreur canvas","error"); return false; }
+      // Vérifier que la signature n'est pas vide (optionnel — on peut valider sans signer)
+      const ctx2  = canvas.getContext("2d");
+      const data  = ctx2.getImageData(0,0,canvas.width,canvas.height).data;
+      const vide  = !data.some(v=>v<250);
+      if(vide){
+        // Pas de signature tracée : on ferme sans rien enregistrer
+        toast("Aucune signature — document non signé (vous pouvez signer plus tard)", "info");
+        return true; // ferme la modal sans bloquer
+      }
+      _signatureData = canvas.toDataURL("image/png");
+      // Afficher aperçu
+      const zone = document.getElementById("zoneSignatureApercue");
+      const img  = document.getElementById("apercuSignature");
+      if(zone && img){
+        img.src = _signatureData;
+        zone.style.display = "";
+        if(nom) zone.querySelector("div").textContent = `✍️ Signé par ${nom} le ${new Date().toLocaleDateString("fr-FR")} :`;
+      }
+      toast(`✅ Signature enregistrée${nom?" de "+nom:""} — sauvegardez le document`);
+    }
+  );
+
+  // Initialiser le canvas de signature
+  setTimeout(()=>{ initCanvasSignature(); }, 100);
+}
+
+function initCanvasSignature(){
+  const canvas = document.getElementById("canvasSignature");
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = "#1e293b";
+  ctx.lineWidth = 2;
+  ctx.font = "12px sans-serif";
+  ctx.fillStyle = "#d1d5db";
+  ctx.fillText("Signez ici ↓", canvas.width/2-40, canvas.height/2);
+
+  let dessin = false;
+  ctx.strokeStyle = "#1e40af";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  const getPos = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const src = e.touches ? e.touches[0] : e;
+    return { x: (src.clientX - rect.left)*scaleX, y: (src.clientY - rect.top)*scaleY };
+  };
+
+  canvas.addEventListener("mousedown",  e=>{ dessin=true; ctx.beginPath(); const p=getPos(e); ctx.moveTo(p.x,p.y); e.preventDefault(); });
+  canvas.addEventListener("mousemove",  e=>{ if(!dessin) return; const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); e.preventDefault(); });
+  canvas.addEventListener("mouseup",    ()=>{ dessin=false; });
+  canvas.addEventListener("mouseleave", ()=>{ dessin=false; });
+  canvas.addEventListener("touchstart", e=>{ dessin=true; ctx.beginPath(); const p=getPos(e); ctx.moveTo(p.x,p.y); e.preventDefault(); }, {passive:false});
+  canvas.addEventListener("touchmove",  e=>{ if(!dessin) return; const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); e.preventDefault(); }, {passive:false});
+  canvas.addEventListener("touchend",   ()=>{ dessin=false; });
+}
+
+function effacerCanvasSignature(){
+  const canvas = document.getElementById("canvasSignature");
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = "#d1d5db";
+  ctx.font = "12px sans-serif";
+  ctx.fillText("Signez ici ↓", canvas.width/2-40, canvas.height/2);
+}
+
+function effacerSignature(){
+  _signatureData = "";
+  const zone = document.getElementById("zoneSignatureApercue");
+  if(zone) zone.style.display = "none";
+  toast("Signature retirée");
+}
+
+// Intégrer la signature dans sauvegarderDocument
+const _origSauvegarderDocument = sauvegarderDocument;
+function sauvegarderDocument(){
+  _origSauvegarderDocument();
+  // Ajouter la signature au dernier document sauvegardé si elle existe
+  if(_signatureData && documents.length > 0){
+    documents[documents.length-1].signature = _signatureData;
+    documents[documents.length-1].signatureDate = new Date().toISOString().split("T")[0];
+    localStorage.setItem("documents", JSON.stringify(documents));
+    if(db && _firebaseActif) db.ref("/documents").set(documents).catch(()=>{});
+  }
+}
+
+// Intégrer la signature dans le PDF
+const _origGenPdf = _genPdf;
+function _genPdf(savedDoc){
+  _origGenPdf(savedDoc);
+  // Note : la signature est ajoutée séparément via genererPdfAvecSignature
+}
+
+function genererPdfAvecSignature(savedDoc){
+  // Régénérer le PDF avec la signature intégrée
+  const doc2 = savedDoc || (documents.length > 0 ? documents[documents.length-1] : null);
+  if(!doc2?.signature){ toast("Aucune signature enregistrée","error"); return; }
+  if(!window.jspdf){ toast("Bibliothèque PDF non chargée","error"); return; }
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF();
+  // Générer le PDF normal puis ajouter la signature
+  pdf.setFontSize(8); pdf.setTextColor(100);
+  pdf.text("Document signé électroniquement le "+doc2.signatureDate, 14, 280);
+  try{
+    pdf.addImage(doc2.signature, "PNG", 14, 250, 60, 20);
+  }catch(e){}
+  pdf.save(`${doc2.id||"document"}-signe.pdf`);
+}
+
+/* =====================================================================
+   FACTURATION ÉLECTRONIQUE — MODULE COMPLET
+   - Export XML Factur-X (UBL 2.1 / EN 16931)
+   - Mentions légales conformes
+   - Centre de gestion facturation électronique
+===================================================================== */
+
+/* ── Gestionnaire facturation électronique ── */
+function ouvrirFacturationElectronique(){
+  const factures = documents.filter(d=>d.type==="facture");
+  const nonExportees = factures.filter(d=>!d.exportXML);
+  const exportees    = factures.filter(d=>d.exportXML);
+  const siretOk = (entreprise.siret||"").replace(/\s/g,"").length === 14;
+  const tvaOk   = !!(entreprise.tva||"").trim();
+
+  ouvrirModal("🧾 Facturation électronique",
+    `<div style="display:flex;flex-direction:column;gap:16px;">
+
+      <!-- Statut conformité -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;">
+        <h3 style="color:#a78bfa;margin-bottom:10px;">⚖️ Statut de conformité</h3>
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;">
+          <div style="display:flex;justify-content:space-between;">
+            <span>N° SIRET (14 chiffres)</span>
+            <span style="color:${siretOk?"#34d399":"#f87171"};">${siretOk?"✅ OK":"❌ Manquant — renseignez dans Entreprise"}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span>N° TVA intracommunautaire</span>
+            <span style="color:${tvaOk?"#34d399":"#f59e0b"};">${tvaOk?"✅ OK":"⚠️ Recommandé"}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span>Raison sociale</span>
+            <span style="color:${entreprise.nom?"#34d399":"#f87171"};">${entreprise.nom?"✅ "+escHtml(entreprise.nom):"❌ Manquant"}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span>Conditions de règlement</span>
+            <span style="color:${entreprise.cgu?"#34d399":"#f59e0b"};">${entreprise.cgu?"✅ OK":"⚠️ À renseigner"}</span>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding:10px;background:#1e293b;border-radius:6px;font-size:12px;line-height:1.8;color:#94a3b8;">
+          📅 <b style="color:#f59e0b;">Calendrier réglementaire :</b><br>
+          • <b>1er sept. 2026</b> — Réception obligatoire pour toutes entreprises<br>
+          • <b>1er sept. 2027</b> — Émission obligatoire PME/TPE/micro-entreprises<br>
+          • Format requis : <b>Factur-X / UBL 2.1 / CII</b> via plateforme immatriculée (PDP)
+        </div>
+      </div>
+
+      <!-- Statistiques -->
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;background:#1e293b;border-radius:8px;padding:12px;border-top:2px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;">Factures total</div>
+          <div style="font-size:20px;font-weight:bold;color:#34d399;">${factures.length}</div>
+        </div>
+        <div style="flex:1;background:#1e293b;border-radius:8px;padding:12px;border-top:2px solid #38bdf8;">
+          <div style="font-size:11px;color:#64748b;">Exportées XML</div>
+          <div style="font-size:20px;font-weight:bold;color:#38bdf8;">${exportees.length}</div>
+        </div>
+        <div style="flex:1;background:#1e293b;border-radius:8px;padding:12px;border-top:2px solid #f59e0b;">
+          <div style="font-size:11px;color:#64748b;">À exporter</div>
+          <div style="font-size:20px;font-weight:bold;color:#f59e0b;">${nonExportees.length}</div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button onclick="exporterToutesFacturesXML()" class="btn-success" style="width:100%;">
+          📦 Exporter toutes les factures en XML (${factures.length} facture${factures.length>1?"s":""})
+        </button>
+        <button onclick="exporterNonExporteesXML()" style="background:#0891b2;width:100%;">
+          🆕 Exporter uniquement les nouvelles (${nonExportees.length} non exportée${nonExportees.length>1?"s":""})
+        </button>
+        <button onclick="genererRapportFacturation()" style="background:#334155;width:100%;">
+          📊 Rapport de facturation (PDF)
+        </button>
+      </div>
+
+      <!-- Liste factures -->
+      ${factures.length > 0 ? `
+      <div>
+        <h3 style="color:#38bdf8;margin-bottom:8px;font-size:14px;">📋 Toutes les factures</h3>
+        <div style="max-height:200px;overflow-y:auto;">
+          <table style="width:100%;font-size:12px;border-collapse:collapse;">
+            <thead><tr style="background:#0f172a;position:sticky;top:0;">
+              <th style="padding:6px 8px;text-align:left;">N°</th>
+              <th style="padding:6px 8px;">Date</th>
+              <th style="padding:6px 8px;text-align:right;">TTC</th>
+              <th style="padding:6px 8px;">Règlement</th>
+              <th style="padding:6px 8px;">XML</th>
+            </tr></thead>
+            <tbody>
+              ${factures.map((doc,_)=>{
+                const idx = documents.indexOf(doc);
+                const stColor = doc.statutReglement==="Réglé"?"#34d399":doc.statutReglement==="Partiel"?"#f59e0b":"#f87171";
+                return `<tr style="border-bottom:1px solid #1e293b;">
+                  <td style="padding:5px 8px;color:#38bdf8;font-weight:bold;">${escHtml(doc.id)}</td>
+                  <td style="padding:5px 8px;color:#94a3b8;">${escHtml(doc.date||"—")}</td>
+                  <td style="padding:5px 8px;text-align:right;">${doc.totalTTC.toLocaleString("fr-FR",{minimumFractionDigits:2})} €</td>
+                  <td style="padding:5px 8px;color:${stColor};">${doc.statutReglement||"—"}</td>
+                  <td style="padding:5px 8px;">
+                    ${doc.exportXML
+                      ? `<span style="color:#34d399;font-size:11px;">✅ ${doc.exportXML}</span>`
+                      : `<button onclick="exporterFactureXML(${idx})" style="background:#7c3aed;font-size:11px;padding:2px 7px;">🧾 XML</button>`}
+                  </td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>` : `<p style="color:#64748b;text-align:center;">Aucune facture enregistrée.</p>`}
+    </div>`,
+    null
+  );
+  setTimeout(()=>{ const btn=document.getElementById("modalBtnOk"); if(btn) btn.style.display="none"; }, 50);
+}
+
+/* ── Génération XML Factur-X (profil MINIMUM / EN 16931) ── */
+function genererXMLFacturX(doc){
+  const e = entreprise;
+  const dossier = doc.dossierIdx !== null ? dossiers[doc.dossierIdx] : null;
+  const now = new Date();
+  const dateIso = (doc.date||now.toISOString().split("T")[0]).replace(/-/g,"");
+  const dateEcheance = (() => {
+    const d = new Date(doc.date||now);
+    d.setDate(d.getDate()+30);
+    return d.toISOString().split("T")[0].replace(/-/g,"");
+  })();
+
+  const lignes = (doc.lignes||[]).map((l,i)=>{
+    const qte   = l.qte||l.quantite||1;
+    const pu    = l.prixHT||l.prix||0;
+    const tva   = l.tva||20;
+    const htL   = qte * pu;
+    const tvaL  = htL * tva/100;
+    return `
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>${i+1}</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:Name>${escXml(l.designation||l.design||"Prestation")}</ram:Name>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:NetPriceProductTradePrice>
+          <ram:ChargeAmount>${pu.toFixed(2)}</ram:ChargeAmount>
+        </ram:NetPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="C62">${qte}</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CategoryCode>S</ram:CategoryCode>
+          <ram:RateApplicablePercent>${tva}</ram:RateApplicablePercent>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>${htL.toFixed(2)}</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>`;
+  }).join("");
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!-- Factur-X / ZUGFeRD 2.1 — Profil EN 16931 -->
+<!-- Généré par DA-Gestion — Garage GlassMéca -->
+<rsm:CrossIndustryInvoice
+  xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+  xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+  xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+
+  <rsm:ExchangedDocumentContext>
+    <ram:GuidelineSpecifiedDocumentContextParameter>
+      <ram:ID>urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:en16931</ram:ID>
+    </ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+
+  <rsm:ExchangedDocument>
+    <ram:ID>${escXml(doc.id)}</ram:ID>
+    <ram:TypeCode>380</ram:TypeCode>
+    <ram:IssueDateTime>
+      <udt:DateTimeString format="102">${dateIso}</udt:DateTimeString>
+    </ram:IssueDateTime>
+  </rsm:ExchangedDocument>
+
+  <rsm:SupplyChainTradeTransaction>
+
+    <!-- Vendeur (votre garage) -->
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty>
+        <ram:Name>${escXml(e.nom||"Garage GlassMéca")}</ram:Name>
+        <ram:PostalTradeAddress>
+          <ram:LineOne>${escXml(e.adresse||"")}</ram:LineOne>
+          <ram:CountryID>FR</ram:CountryID>
+        </ram:PostalTradeAddress>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">${escXml(e.tva||"")}</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="FC">${escXml((e.siret||"").replace(/\s/g,""))}</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+      </ram:SellerTradeParty>
+
+      <!-- Acheteur (client) -->
+      <ram:BuyerTradeParty>
+        <ram:Name>${escXml(dossier?.client||doc.titre||"Client")}</ram:Name>
+      </ram:BuyerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+
+    <ram:ApplicableHeaderTradeDelivery/>
+
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:SpecifiedTradeSettlementPaymentMeans>
+        <ram:TypeCode>30</ram:TypeCode>
+        ${e.iban ? `<ram:PayeePartyCreditorFinancialAccount><ram:IBANID>${escXml(e.iban)}</ram:IBANID></ram:PayeePartyCreditorFinancialAccount>` : ""}
+      </ram:SpecifiedTradeSettlementPaymentMeans>
+
+      <!-- TVA -->
+      <ram:ApplicableTradeTax>
+        <ram:CalculatedAmount>${(doc.totalTVA||0).toFixed(2)}</ram:CalculatedAmount>
+        <ram:TypeCode>VAT</ram:TypeCode>
+        <ram:BasisAmount>${(doc.totalHT||0).toFixed(2)}</ram:BasisAmount>
+        <ram:CategoryCode>S</ram:CategoryCode>
+        <ram:RateApplicablePercent>20</ram:RateApplicablePercent>
+      </ram:ApplicableTradeTax>
+
+      <!-- Échéance -->
+      <ram:SpecifiedTradePaymentTerms>
+        <ram:Description>${escXml(e.cgu||"30 jours net")}</ram:Description>
+        <ram:DueDateDateTime>
+          <udt:DateTimeString format="102">${dateEcheance}</udt:DateTimeString>
+        </ram:DueDateDateTime>
+      </ram:SpecifiedTradePaymentTerms>
+
+      <!-- Totaux -->
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>${(doc.totalHT||0).toFixed(2)}</ram:LineTotalAmount>
+        <ram:TaxBasisTotalAmount>${(doc.totalHT||0).toFixed(2)}</ram:TaxBasisTotalAmount>
+        <ram:TaxTotalAmount currencyID="EUR">${(doc.totalTVA||0).toFixed(2)}</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>${(doc.totalTTC||0).toFixed(2)}</ram:GrandTotalAmount>
+        <ram:DuePayableAmount>${(doc.totalTTC||0).toFixed(2)}</ram:DuePayableAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+
+    <!-- Lignes -->
+    ${lignes}
+
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>`;
+
+  return xml;
+}
+
+function escXml(str){
+  if(!str) return "";
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&apos;");
+}
+
+function telechargerXML(xml, nomFichier){
+  const blob = new Blob([xml], {type:"application/xml;charset=utf-8;"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = nomFichier;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function exporterFactureXML(i){
+  const doc = documents[i];
+  if(!doc){ toast("Document introuvable","error"); return; }
+  if(doc.type !== "facture"){ toast("Seules les factures peuvent être exportées en XML","error"); return; }
+
+  // Vérification minimale
+  if(!(entreprise.siret||"").replace(/\s/g,"")){ 
+    toast("⚠️ Renseignez votre SIRET dans Entreprise avant l'export XML","error");
+    return;
+  }
+
+  const xml      = genererXMLFacturX(doc);
+  const nomFichier = `FacturX-${doc.id}-${doc.date||"2026"}.xml`;
+  telechargerXML(xml, nomFichier);
+
+  // Marquer comme exportée
+  documents[i].exportXML     = new Date().toISOString().split("T")[0];
+  documents[i].nomFichierXML = nomFichier;
+  localStorage.setItem("documents", JSON.stringify(documents));
+  if(db && _firebaseActif) db.ref("/documents").set(documents).catch(()=>{});
+  renderDocuments();
+  toast(`✅ Facture ${doc.id} exportée en XML Factur-X — ${nomFichier}`);
+}
+
+function exporterToutesFacturesXML(){
+  const factures = documents.filter(d=>d.type==="facture");
+  if(factures.length === 0){ toast("Aucune facture à exporter","error"); return; }
+  if(!(entreprise.siret||"").replace(/\s/g,"")){ toast("Renseignez votre SIRET dans Entreprise","error"); return; }
+  let count = 0;
+  factures.forEach(doc=>{
+    const i = documents.indexOf(doc);
+    const xml = genererXMLFacturX(doc);
+    const nom = `FacturX-${doc.id}-${doc.date||"2026"}.xml`;
+    telechargerXML(xml, nom);
+    documents[i].exportXML = new Date().toISOString().split("T")[0];
+    documents[i].nomFichierXML = nom;
+    count++;
+  });
+  localStorage.setItem("documents", JSON.stringify(documents));
+  if(db && _firebaseActif) db.ref("/documents").set(documents).catch(()=>{});
+  renderDocuments();
+  toast(`✅ ${count} facture${count>1?"s":""} exportée${count>1?"s":""} en XML Factur-X`);
+}
+
+function exporterNonExporteesXML(){
+  const nonExp = documents.filter(d=>d.type==="facture" && !d.exportXML);
+  if(nonExp.length === 0){ toast("Toutes les factures sont déjà exportées ✓"); return; }
+  if(!(entreprise.siret||"").replace(/\s/g,"")){ toast("Renseignez votre SIRET dans Entreprise","error"); return; }
+  nonExp.forEach(doc=>{
+    const i = documents.indexOf(doc);
+    const xml = genererXMLFacturX(doc);
+    const nom = `FacturX-${doc.id}-${doc.date||"2026"}.xml`;
+    telechargerXML(xml, nom);
+    documents[i].exportXML = new Date().toISOString().split("T")[0];
+    documents[i].nomFichierXML = nom;
+  });
+  localStorage.setItem("documents", JSON.stringify(documents));
+  if(db && _firebaseActif) db.ref("/documents").set(documents).catch(()=>{});
+  renderDocuments();
+  toast(`✅ ${nonExp.length} nouvelle${nonExp.length>1?"s":""} facture${nonExp.length>1?"s":""} exportée${nonExp.length>1?"s":""}`);
+}
+
+/* ── Rapport de facturation PDF ── */
+function genererRapportFacturation(){
+  if(!window.jspdf){ toast("Bibliothèque PDF non chargée","error"); return; }
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF();
+  const factures = documents.filter(d=>d.type==="facture");
+  const now = new Date();
+
+  // En-tête
+  pdf.setFillColor(15,23,42);
+  pdf.rect(0,0,210,28,"F");
+  pdf.setTextColor(255,255,255);
+  pdf.setFontSize(16); pdf.setFont(undefined,"bold");
+  pdf.text("RAPPORT DE FACTURATION", 105, 12, {align:"center"});
+  pdf.setFontSize(9); pdf.setFont(undefined,"normal");
+  pdf.text(`${entreprise.nom||"Garage GlassMéca"} — Généré le ${now.toLocaleDateString("fr-FR")}`, 105, 20, {align:"center"});
+
+  let y = 36;
+  pdf.setTextColor(0,0,0); pdf.setFontSize(10);
+
+  // Résumé
+  const totalTTC   = factures.reduce((a,d)=>a+(d.totalTTC||0),0);
+  const totalHT    = factures.reduce((a,d)=>a+(d.totalHT||0),0);
+  const totalTVA   = factures.reduce((a,d)=>a+(d.totalTVA||0),0);
+  const reglees    = factures.filter(d=>d.statutReglement==="Réglé");
+  const nonReglees = factures.filter(d=>d.statutReglement==="Non réglé");
+  const fmt = v => v.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  pdf.setFillColor(241,245,249);
+  pdf.rect(14,y,182,32,"F");
+  pdf.setFont(undefined,"bold"); pdf.setFontSize(9);
+  pdf.text(`Nombre de factures : ${factures.length}`, 18, y+7);
+  pdf.text(`Total HT : ${fmt(totalHT)}`,              18, y+13);
+  pdf.text(`Total TVA : ${fmt(totalTVA)}`,            18, y+19);
+  pdf.text(`Total TTC : ${fmt(totalTTC)}`,            18, y+25);
+  pdf.text(`Réglées : ${reglees.length} (${fmt(reglees.reduce((a,d)=>a+(d.totalTTC||0),0))})`,    105, y+7);
+  pdf.text(`Impayées : ${nonReglees.length} (${fmt(nonReglees.reduce((a,d)=>a+(d.totalTTC||0),0))})`, 105, y+13);
+  pdf.text(`Marges enregistrées : ${factures.filter(d=>d.margeHT!==undefined).length} factures`, 105, y+19);
+  y += 38;
+
+  // Table
+  pdf.setFillColor(15,23,42); pdf.rect(14,y,182,7,"F");
+  pdf.setTextColor(255,255,255); pdf.setFont(undefined,"bold"); pdf.setFontSize(8);
+  pdf.text("N° Facture", 16, y+5);
+  pdf.text("Date",       55, y+5);
+  pdf.text("Client/Titre",70, y+5);
+  pdf.text("HT",         130, y+5);
+  pdf.text("TTC",        150, y+5);
+  pdf.text("Règlement",  172, y+5);
+  y += 9;
+
+  pdf.setTextColor(0,0,0); pdf.setFont(undefined,"normal"); pdf.setFontSize(8);
+  factures.forEach((doc,idx)=>{
+    if(idx%2===0){ pdf.setFillColor(248,250,252); pdf.rect(14,y-1,182,7,"F"); }
+    pdf.text(doc.id||"",                        16, y+4);
+    pdf.text(doc.date||"",                      55, y+4);
+    pdf.text((doc.titre||"").substring(0,28),   70, y+4);
+    pdf.text(fmt(doc.totalHT||0),              128, y+4, {align:"right"});
+    pdf.text(fmt(doc.totalTTC||0),             148, y+4, {align:"right"});
+    const stc = doc.statutReglement==="Réglé" ? [0,128,0] : doc.statutReglement==="Partiel" ? [180,100,0] : [200,0,0];
+    pdf.setTextColor(...stc);
+    pdf.text(doc.statutReglement||"—",         172, y+4);
+    pdf.setTextColor(0,0,0);
+    y += 7;
+    if(y > 265){ pdf.addPage(); y = 20; }
+  });
+
+  // Mentions légales
+  y += 5;
+  pdf.setFontSize(7); pdf.setTextColor(120,120,120);
+  pdf.text(`SIRET : ${(entreprise.siret||"Non renseigné")} — TVA : ${entreprise.tva||"Non renseigné"}`, 14, y); y+=4;
+  if(entreprise.penalites) pdf.text(`Pénalités de retard : ${entreprise.penalites}`, 14, y); y+=4;
+  if(entreprise.cgu) pdf.text(`Conditions de règlement : ${entreprise.cgu}`, 14, y);
+
+  pdf.save(`Rapport-Facturation-${now.toISOString().split("T")[0]}.pdf`);
+  toast("Rapport de facturation PDF généré ✓");
+}
+
+/* ── Mentions légales auto dans PDF facture ── */
+// Hook sur _genPdf pour ajouter les mentions légales et le badge Factur-X
+const _genPdfOrig2 = typeof _genPdfOrig !== "undefined" ? _genPdfOrig : null;
+// On enrichit directement le PDF existant via un post-traitement de genererPdfDocument
+const _genPdfBase = genererPdfDocument;
+
+/* =====================================================================
+   ENCAISSEMENT RAPIDE + DEVIS/FACTURE SIMPLIFIÉ SUR DOSSIER
+===================================================================== */
+
+/* ── Panneau financier unifié pour dossier vitrage ── */
+function ouvrirFinancierDossier(index){
+  const d = dossiers[index];
+  if(!d) return;
+
+  const montantDevis   = parseFloat(d.devis||0);
+  const montantFacture = parseFloat(d.facture||0);
+  const montantEncaisse= parseFloat(d.montantEncaisse||0);
+  const solde          = montantFacture - montantEncaisse;
+  const statutPaiement = d.statutPaiement || (montantEncaisse >= montantFacture && montantFacture > 0 ? "Réglé" : montantEncaisse > 0 ? "Partiel" : "Non réglé");
+
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+  const stColor = statutPaiement==="Réglé" ? "#34d399" : statutPaiement==="Partiel" ? "#f59e0b" : "#f87171";
+
+  ouvrirModal(`💰 Financier — Dossier ${escHtml(d.numero)} — ${escHtml(d.client)}`,
+    `<div style="display:flex;flex-direction:column;gap:16px;">
+
+      <!-- Résumé financier -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;">
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid #38bdf8;">
+          <div style="font-size:11px;color:#64748b;">Devis</div>
+          <div style="font-size:18px;font-weight:bold;color:#38bdf8;">${fmtE(montantDevis)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid #a78bfa;">
+          <div style="font-size:11px;color:#64748b;">Facture</div>
+          <div style="font-size:18px;font-weight:bold;color:#a78bfa;">${fmtE(montantFacture)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;">Encaissé</div>
+          <div style="font-size:18px;font-weight:bold;color:#34d399;">${fmtE(montantEncaisse)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid ${stColor};">
+          <div style="font-size:11px;color:#64748b;">Solde dû</div>
+          <div style="font-size:18px;font-weight:bold;color:${stColor};">${fmtE(solde)}</div>
+          <div style="font-size:11px;color:${stColor};margin-top:2px;">${statutPaiement}</div>
+        </div>
+      </div>
+
+      <!-- Onglets actions -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #1e293b;padding-bottom:10px;">
+        <button onclick="afficherOngletFinancier('devis',${index},'vitrage')"   id="onglet_devis_${index}"   style="background:#1e3a5f;border-bottom:2px solid #38bdf8;font-size:12px;padding:6px 12px;">📋 Devis</button>
+        <button onclick="afficherOngletFinancier('facture',${index},'vitrage')" id="onglet_facture_${index}" style="background:#0f172a;font-size:12px;padding:6px 12px;">🧾 Facture</button>
+        <button onclick="afficherOngletFinancier('encaissement',${index},'vitrage')" id="onglet_enc_${index}" style="background:#0f172a;font-size:12px;padding:6px 12px;">💳 Encaisser</button>
+        <button onclick="afficherOngletFinancier('historique',${index},'vitrage')" id="onglet_hist_${index}" style="background:#0f172a;font-size:12px;padding:6px 12px;">📜 Historique</button>
+      </div>
+
+      <!-- Zone contenu onglet -->
+      <div id="contenuOngletFinancier"></div>
+
+    </div>`,
+    null
+  );
+  setTimeout(()=>{
+    const btn = document.getElementById("modalBtnOk");
+    if(btn) btn.style.display = "none";
+    afficherOngletFinancier("devis", index, "vitrage");
+  }, 60);
+}
+
+/* ── Panneau financier pour dossier mécanique ── */
+function ouvrirFinancierMecanique(index){
+  const d = dossiersMecanique[index];
+  if(!d) return;
+  recalculerTotauxMecanique(d);
+
+  const montantDevis   = parseFloat(d.devis||0);
+  const montantFacture = parseFloat(d.facture||0);
+  const montantEncaisse= parseFloat(d.montantEncaisse||0);
+  const solde          = montantFacture - montantEncaisse;
+  const statutPaiement = d.statutPaiement || (montantEncaisse >= montantFacture && montantFacture > 0 ? "Réglé" : montantEncaisse > 0 ? "Partiel" : "Non réglé");
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+  const stColor = statutPaiement==="Réglé" ? "#34d399" : statutPaiement==="Partiel" ? "#f59e0b" : "#f87171";
+
+  ouvrirModal(`💰 Financier — Dossier ${escHtml(d.numero)} — ${escHtml(d.client)}`,
+    `<div style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;">
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid #38bdf8;">
+          <div style="font-size:11px;color:#64748b;">Devis</div>
+          <div style="font-size:18px;font-weight:bold;color:#38bdf8;">${fmtE(montantDevis)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid #a78bfa;">
+          <div style="font-size:11px;color:#64748b;">Facture</div>
+          <div style="font-size:18px;font-weight:bold;color:#a78bfa;">${fmtE(montantFacture)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;">Encaissé</div>
+          <div style="font-size:18px;font-weight:bold;color:#34d399;">${fmtE(montantEncaisse)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:12px;border-top:2px solid ${stColor};">
+          <div style="font-size:11px;color:#64748b;">Solde dû</div>
+          <div style="font-size:18px;font-weight:bold;color:${stColor};">${fmtE(solde)}</div>
+          <div style="font-size:11px;color:${stColor};margin-top:2px;">${statutPaiement}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #1e293b;padding-bottom:10px;">
+        <button onclick="afficherOngletFinancier('devis',${index},'mecanique')"        id="onglet_devis_${index}"   style="background:#1e3a5f;border-bottom:2px solid #38bdf8;font-size:12px;padding:6px 12px;">📋 Devis</button>
+        <button onclick="afficherOngletFinancier('facture',${index},'mecanique')"      id="onglet_facture_${index}" style="background:#0f172a;font-size:12px;padding:6px 12px;">🧾 Facture</button>
+        <button onclick="afficherOngletFinancier('encaissement',${index},'mecanique')" id="onglet_enc_${index}"     style="background:#0f172a;font-size:12px;padding:6px 12px;">💳 Encaisser</button>
+        <button onclick="afficherOngletFinancier('historique',${index},'mecanique')"   id="onglet_hist_${index}"    style="background:#0f172a;font-size:12px;padding:6px 12px;">📜 Historique</button>
+      </div>
+      <div id="contenuOngletFinancier"></div>
+    </div>`,
+    null
+  );
+  setTimeout(()=>{
+    const btn = document.getElementById("modalBtnOk");
+    if(btn) btn.style.display = "none";
+    afficherOngletFinancier("devis", index, "mecanique");
+  }, 60);
+}
+
+/* ── Affichage des onglets ── */
+function afficherOngletFinancier(onglet, index, type){
+  const d = type === "mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  const zone = document.getElementById("contenuOngletFinancier");
+  if(!zone) return;
+
+  // Réinitialiser style des onglets
+  ["devis","facture","enc","hist"].forEach(o => {
+    const btn = document.getElementById(`onglet_${o}_${index}`);
+    if(btn){ btn.style.background="#0f172a"; btn.style.borderBottom="none"; }
+  });
+  const actifId = onglet==="encaissement" ? `onglet_enc_${index}` : onglet==="historique" ? `onglet_hist_${index}` : `onglet_${onglet}_${index}`;
+  const actifBtn = document.getElementById(actifId);
+  if(actifBtn){ actifBtn.style.background="#1e3a5f"; actifBtn.style.borderBottom="2px solid #38bdf8"; }
+
+  if(onglet === "devis" || onglet === "facture"){
+    afficherFormDevisFast(zone, index, type, onglet);
+  } else if(onglet === "encaissement"){
+    afficherFormEncaissement(zone, index, type);
+  } else if(onglet === "historique"){
+    afficherHistoriqueFinancier(zone, index, type);
+  }
+}
+
+/* ── Formulaire devis/facture simplifié ── */
+function afficherFormDevisFast(zone, index, typeDossier, typeDoc){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  const montantActuel = parseFloat(typeDoc==="facture" ? d.facture||0 : d.devis||0);
+  const label = typeDoc === "facture" ? "🧾 Facture" : "📋 Devis";
+  const couleur = typeDoc === "facture" ? "#a78bfa" : "#38bdf8";
+
+  // Récupérer lignes existantes ou vide
+  const lignesKey = `_lignesDossier_${typeDossier}_${index}_${typeDoc}`;
+  if(!window[lignesKey]) window[lignesKey] = [];
+
+  const renderLignesFast = () => {
+    const lignes = window[lignesKey];
+    let totalHT=0, totalTVA=0;
+    const rows = lignes.map((l,i) => {
+      const ht = l.qte * l.prixHT;
+      const tva = ht * (l.tva/100);
+      totalHT += ht; totalTVA += tva;
+      return `<tr>
+        <td>${escHtml(l.designation)}</td>
+        <td style="text-align:center;">${l.qte}</td>
+        <td style="text-align:right;">${l.prixHT.toFixed(2)} €</td>
+        <td style="text-align:center;">${l.tva}%</td>
+        <td style="text-align:right;font-weight:bold;">${(ht+tva).toFixed(2)} €</td>
+        <td><button onclick="supprimerLigneFast('${lignesKey}',${i})" style="background:#7f1d1d;padding:2px 7px;font-size:11px;">✖</button></td>
+      </tr>`;
+    }).join("");
+    const totalTTC = totalHT + totalTVA;
+
+    document.getElementById("tableauLignesFast").innerHTML = rows || `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:12px;">Ajoutez des lignes ci-dessous</td></tr>`;
+    const setT = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+    setT("fastTotalHT",  totalHT.toFixed(2)+" €");
+    setT("fastTotalTVA", totalTVA.toFixed(2)+" €");
+    setT("fastTotalTTC", totalTTC.toFixed(2)+" €");
+    // Mettre à jour champ montant
+    const inp = document.getElementById("fastMontantManuel");
+    if(inp && totalTTC > 0) inp.value = totalTTC.toFixed(2);
+  };
+
+  zone.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <h3 style="color:${couleur};margin:0;">${label}</h3>
+
+      <!-- Catalogue rapide -->
+      <div>
+        <p style="font-size:12px;color:#64748b;margin-bottom:6px;">⚡ Ajouter depuis le catalogue :</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${catalogueTarifs.slice(0,8).map((t,ci)=>`
+            <button onclick="ajouterCatalogueVersFast('${lignesKey}',${ci})" style="background:#1e293b;border:1px solid #334155;font-size:11px;padding:4px 8px;white-space:nowrap;">
+              ${escHtml(t.designation.substring(0,25))} — ${t.prixHT.toFixed(0)} €
+            </button>`).join("")}
+        </div>
+      </div>
+
+      <!-- Saisie rapide ligne -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;background:#0f172a;padding:10px;border-radius:8px;">
+        <div style="flex:2;min-width:140px;">
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Désignation</label>
+          <input type="text" id="fastDesign" placeholder="Prestation ou pièce" style="width:100%;box-sizing:border-box;font-size:13px;" onkeydown="if(event.key==='Enter') ajouterLigneFast('${lignesKey}')">
+        </div>
+        <div style="width:55px;">
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Qté</label>
+          <input type="number" id="fastQte" value="1" min="0.5" step="0.5" style="width:100%;box-sizing:border-box;font-size:13px;">
+        </div>
+        <div style="width:85px;">
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Prix HT</label>
+          <input type="number" id="fastPrix" placeholder="0.00" step="0.01" style="width:100%;box-sizing:border-box;font-size:13px;" onkeydown="if(event.key==='Enter') ajouterLigneFast('${lignesKey}')">
+        </div>
+        <div style="width:70px;">
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">TVA</label>
+          <select id="fastTVA" style="width:100%;box-sizing:border-box;font-size:13px;">
+            <option value="20">20%</option><option value="10">10%</option><option value="0">0%</option>
+          </select>
+        </div>
+        <button onclick="ajouterLigneFast('${lignesKey}')" class="btn-success" style="font-size:13px;">➕</button>
+      </div>
+
+      <!-- Tableau lignes -->
+      <div class="table-wrapper" style="max-height:180px;overflow-y:auto;">
+        <table style="font-size:12px;">
+          <thead><tr style="background:#0f172a;">
+            <th>Désignation</th><th style="width:40px;text-align:center;">Qté</th>
+            <th style="width:80px;text-align:right;">HT</th>
+            <th style="width:50px;text-align:center;">TVA</th>
+            <th style="width:80px;text-align:right;">TTC</th>
+            <th style="width:30px;"></th>
+          </tr></thead>
+          <tbody id="tableauLignesFast"></tbody>
+          <tfoot>
+            <tr style="background:#0f172a;font-size:12px;">
+              <td colspan="2" style="padding:6px 8px;">TOTAL</td>
+              <td style="padding:6px 8px;text-align:right;color:#94a3b8;"><span id="fastTotalHT">0,00 €</span></td>
+              <td style="padding:6px 8px;text-align:center;color:#64748b;"><span id="fastTotalTVA">0,00 €</span></td>
+              <td style="padding:6px 8px;text-align:right;color:#34d399;font-weight:bold;"><span id="fastTotalTTC">0,00 €</span></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Ou saisie directe montant -->
+      <div style="background:#0f172a;border-radius:8px;padding:10px;border:1px dashed #334155;">
+        <p style="font-size:12px;color:#64748b;margin-bottom:6px;">Ou saisir le montant TTC directement :</p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="number" id="fastMontantManuel" value="${montantActuel||""}" step="0.01" placeholder="Montant TTC (€)" style="flex:1;min-width:120px;font-size:15px;font-weight:bold;">
+          <select id="fastModePaiementDevis" style="min-width:130px;">
+            <option value="">Mode règlement</option>
+            ${["Espèces","Chèque","Carte bancaire","Virement","Assurance"].map(m=>`<option value="${m}">${m}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button onclick="sauvegarderFinancierFast(${index},'${typeDossier}','${typeDoc}')" class="btn-success" style="flex:1;">
+          💾 Enregistrer ${typeDoc==="facture"?"la facture":"le devis"}
+        </button>
+        <button onclick="imprimerFinancierFast(${index},'${typeDossier}','${typeDoc}')" style="background:#0891b2;">
+          📄 PDF
+        </button>
+        ${typeDoc==="devis" ? `<button onclick="convertirDevisEnFactureFast(${index},'${typeDossier}')" style="background:#7c3aed;">🔄 → Facture</button>` : ""}
+      </div>
+    </div>`;
+
+  // Charger les lignes existantes
+  if(window[lignesKey].length === 0 && d[`lignes_${typeDoc}`]?.length){
+    window[lignesKey] = [...d[`lignes_${typeDoc}`]];
+  }
+  renderLignesFast();
+  document.getElementById("fastDesign")?.focus();
+}
+
+function ajouterLigneFast(lignesKey){
+  const design = document.getElementById("fastDesign")?.value.trim();
+  const qte    = parseFloat(document.getElementById("fastQte")?.value||"1");
+  const prix   = parseFloat(document.getElementById("fastPrix")?.value||"0");
+  const tva    = parseFloat(document.getElementById("fastTVA")?.value||"20");
+  if(!design){ toast("Désignation obligatoire","error"); return; }
+  if(!prix || prix <= 0){ toast("Prix obligatoire","error"); return; }
+  if(!window[lignesKey]) window[lignesKey] = [];
+  window[lignesKey].push({ designation:design, qte, prixHT:prix, tva });
+  document.getElementById("fastDesign").value = "";
+  document.getElementById("fastPrix").value   = "";
+  document.getElementById("fastQte").value    = "1";
+  // Re-render
+  const zone = document.getElementById("contenuOngletFinancier");
+  if(zone){
+    const tbody = document.getElementById("tableauLignesFast");
+    if(tbody) _reRenderLignesFast(lignesKey);
+  }
+  document.getElementById("fastDesign")?.focus();
+}
+
+function supprimerLigneFast(lignesKey, i){
+  if(!window[lignesKey]) return;
+  window[lignesKey].splice(i,1);
+  _reRenderLignesFast(lignesKey);
+}
+
+function ajouterCatalogueVersFast(lignesKey, catalogueIdx){
+  const t = catalogueTarifs[catalogueIdx];
+  if(!t) return;
+  if(!window[lignesKey]) window[lignesKey] = [];
+  window[lignesKey].push({ designation:t.designation, qte:1, prixHT:t.prixHT, tva:t.tva });
+  _reRenderLignesFast(lignesKey);
+  toast(`"${t.designation}" ajouté ✓`);
+}
+
+function _reRenderLignesFast(lignesKey){
+  const lignes = window[lignesKey]||[];
+  let totalHT=0, totalTVA=0;
+  const rows = lignes.map((l,i) => {
+    const ht = l.qte * l.prixHT;
+    const tva = ht * (l.tva/100);
+    totalHT += ht; totalTVA += tva;
+    return `<tr>
+      <td>${escHtml(l.designation)}</td>
+      <td style="text-align:center;">${l.qte}</td>
+      <td style="text-align:right;">${l.prixHT.toFixed(2)} €</td>
+      <td style="text-align:center;">${l.tva}%</td>
+      <td style="text-align:right;font-weight:bold;">${(ht+tva).toFixed(2)} €</td>
+      <td><button onclick="supprimerLigneFast('${lignesKey}',${i})" style="background:#7f1d1d;padding:2px 7px;font-size:11px;">✖</button></td>
+    </tr>`;
+  }).join("");
+  const totalTTC = totalHT + totalTVA;
+  const tbody = document.getElementById("tableauLignesFast");
+  if(tbody) tbody.innerHTML = rows || `<tr><td colspan="6" style="text-align:center;color:#64748b;padding:12px;">Aucune ligne</td></tr>`;
+  const setT = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  setT("fastTotalHT",  totalHT.toFixed(2)+" €");
+  setT("fastTotalTVA", totalTVA.toFixed(2)+" €");
+  setT("fastTotalTTC", totalTTC.toFixed(2)+" €");
+  const inp = document.getElementById("fastMontantManuel");
+  if(inp && totalTTC > 0) inp.value = totalTTC.toFixed(2);
+}
+
+function sauvegarderFinancierFast(index, typeDossier, typeDoc){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+
+  const lignesKey = `_lignesDossier_${typeDossier}_${index}_${typeDoc}`;
+  const lignes = window[lignesKey]||[];
+  let totalTTC = 0;
+
+  if(lignes.length > 0){
+    lignes.forEach(l => { totalTTC += l.qte * l.prixHT * (1 + l.tva/100); });
+    d[`lignes_${typeDoc}`] = [...lignes];
+  } else {
+    totalTTC = parseFloat(document.getElementById("fastMontantManuel")?.value||"0");
+  }
+
+  if(totalTTC <= 0){ toast("Montant obligatoire","error"); return; }
+
+  if(typeDoc === "facture"){
+    d.facture = totalTTC.toFixed(2);
+    d.statut  = "Facturé";
+    const mode = document.getElementById("fastModePaiementDevis")?.value;
+    if(mode) d.modePaiementFacture = mode;
+  } else {
+    d.devis = totalTTC.toFixed(2);
+  }
+
+  if(typeDossier === "mecanique"){
+    saveData(); renderDossiersMecanique(); ouvrirDossierMecanique(index);
+  } else {
+    saveData(); renderDossiers(); ouvrirDossier(index);
+  }
+
+  toast(`${typeDoc==="facture"?"Facture":"Devis"} de ${totalTTC.toLocaleString("fr-FR",{minimumFractionDigits:2})} € enregistré ✓`);
+  // Rafraîchir le modal financier
+  setTimeout(()=>{
+    const zone = document.getElementById("contenuOngletFinancier");
+    if(zone) afficherOngletFinancier(typeDoc, index, typeDossier);
+  }, 200);
+}
+
+function convertirDevisEnFactureFast(index, typeDossier){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  const montant = parseFloat(d.devis||0);
+  if(montant <= 0){ toast("Aucun devis à convertir","error"); return; }
+  d.facture = d.devis;
+  d.statut  = "Facturé";
+  // Copier les lignes devis vers facture
+  if(d.lignes_devis) d.lignes_facture = [...d.lignes_devis];
+  if(typeDossier==="mecanique"){ saveData(); renderDossiersMecanique(); }
+  else { saveData(); renderDossiers(); }
+  toast(`Devis de ${montant.toLocaleString("fr-FR",{minimumFractionDigits:2})} € converti en facture ✓`);
+  afficherOngletFinancier("facture", index, typeDossier);
+}
+
+function imprimerFinancierFast(index, typeDossier, typeDoc){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  const lignesKey = `_lignesDossier_${typeDossier}_${index}_${typeDoc}`;
+  const lignes = window[lignesKey]||d[`lignes_${typeDoc}`]||[];
+  const montant = parseFloat(typeDoc==="facture" ? d.facture||0 : d.devis||0);
+
+  if(!window.jspdf){ toast("Bibliothèque PDF non chargée","error"); return; }
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF();
+  const e = entreprise;
+  const today = new Date().toLocaleDateString("fr-FR");
+
+  // En-tête
+  pdf.setFillColor(15,23,42); pdf.rect(0,0,210,30,"F");
+  pdf.setTextColor(255,255,255); pdf.setFontSize(16); pdf.setFont(undefined,"bold");
+  pdf.text(typeDoc==="facture" ? "FACTURE" : "DEVIS", 105, 12, {align:"center"});
+  pdf.setFontSize(9); pdf.setFont(undefined,"normal");
+  pdf.text(`${e.nom||"Garage GlassMéca"} — ${today}`, 105, 20, {align:"center"});
+  pdf.text(`Dossier : ${d.numero} — Client : ${d.client}`, 105, 26, {align:"center"});
+
+  let y = 40;
+  pdf.setTextColor(0,0,0); pdf.setFontSize(9);
+
+  // Infos client et véhicule
+  pdf.setFillColor(241,245,249); pdf.rect(14,y,86,22,"F");
+  pdf.setFont(undefined,"bold"); pdf.text("CLIENT", 16, y+6);
+  pdf.setFont(undefined,"normal");
+  pdf.text(d.client||"", 16, y+12);
+  pdf.text(d.telephone||d.adresse||"", 16, y+17);
+
+  pdf.setFillColor(241,245,249); pdf.rect(110,y,86,22,"F");
+  pdf.setFont(undefined,"bold"); pdf.text("VÉHICULE", 112, y+6);
+  pdf.setFont(undefined,"normal");
+  pdf.text(`${d.vehicule||d.marque||""} ${d.modele||""}`, 112, y+12);
+  pdf.text(`Immat : ${d.immat||"—"}`, 112, y+17);
+  y += 28;
+
+  if(lignes.length > 0){
+    // Tableau lignes
+    pdf.setFillColor(15,23,42); pdf.rect(14,y,182,7,"F");
+    pdf.setTextColor(255,255,255); pdf.setFont(undefined,"bold"); pdf.setFontSize(8);
+    pdf.text("Désignation", 16, y+5); pdf.text("Qté", 125, y+5);
+    pdf.text("PU HT", 140, y+5); pdf.text("TVA", 162, y+5); pdf.text("Total TTC", 178, y+5);
+    y += 9; pdf.setTextColor(0,0,0); pdf.setFont(undefined,"normal");
+
+    let totalHT=0, totalTVA=0;
+    lignes.forEach((l,i)=>{
+      if(i%2===0){ pdf.setFillColor(248,250,252); pdf.rect(14,y-1,182,7,"F"); }
+      const ht=l.qte*l.prixHT; const tva=ht*(l.tva/100);
+      totalHT+=ht; totalTVA+=tva;
+      pdf.text((l.designation||"").substring(0,50), 16, y+4);
+      pdf.text(String(l.qte), 127, y+4);
+      pdf.text(l.prixHT.toFixed(2)+" €", 138, y+4);
+      pdf.text(l.tva+"%", 163, y+4);
+      pdf.text((ht+tva).toFixed(2)+" €", 194, y+4, {align:"right"});
+      y += 7;
+      if(y>250){ pdf.addPage(); y=20; }
+    });
+
+    y += 3;
+    pdf.setDrawColor(200); pdf.line(14,y,196,y); y+=5;
+    pdf.setFont(undefined,"bold");
+    pdf.text("Total HT", 140, y); pdf.text(totalHT.toFixed(2)+" €", 194, y, {align:"right"}); y+=5;
+    pdf.text("TVA", 140, y);      pdf.text(totalTVA.toFixed(2)+" €", 194, y, {align:"right"}); y+=5;
+    pdf.setFontSize(11);
+    pdf.text("Total TTC", 138, y); pdf.text((totalHT+totalTVA).toFixed(2)+" €", 194, y, {align:"right"});
+  } else {
+    pdf.setFontSize(13); pdf.setFont(undefined,"bold");
+    pdf.text(`Montant ${typeDoc==="facture"?"Facture":"Devis"} : ${montant.toFixed(2)} € TTC`, 105, y+10, {align:"center"});
+  }
+
+  // Mentions légales
+  const pageH = pdf.internal.pageSize.height;
+  pdf.setFontSize(6.5); pdf.setTextColor(130,130,130); let my=pageH-18;
+  const ml=(t)=>{ if(t){ pdf.text(String(t),14,my); my+=3.5; }};
+  if(e.siret) ml(`SIRET : ${e.siret}${e.tva?" — TVA : "+e.tva:""}`);
+  if(e.cgu)   ml(`Conditions : ${e.cgu}`);
+  if(e.penalites) ml(`Pénalités : ${e.penalites}`);
+
+  pdf.save(`${typeDoc==="facture"?"Facture":"Devis"}-${d.numero}-${d.client.replace(/\s/g,"-")}.pdf`);
+  toast("PDF généré ✓");
+}
+
+/* ── Formulaire encaissement ── */
+function afficherFormEncaissement(zone, index, typeDossier){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  const montantFacture  = parseFloat(d.facture||0);
+  const montantEncaisse = parseFloat(d.montantEncaisse||0);
+  const solde = montantFacture - montantEncaisse;
+  const fmtE  = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  zone.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px;">
+
+      <!-- Résumé -->
+      <div style="background:#0f172a;border-radius:8px;padding:12px;display:flex;gap:20px;flex-wrap:wrap;font-size:13px;">
+        <span>Facture : <b style="color:#a78bfa;">${fmtE(montantFacture)}</b></span>
+        <span>Encaissé : <b style="color:#34d399;">${fmtE(montantEncaisse)}</b></span>
+        <span>Reste dû : <b style="color:${solde>0?"#f87171":"#34d399"};">${fmtE(Math.max(0,solde))}</b></span>
+      </div>
+
+      ${montantFacture <= 0 ? `
+        <div style="background:#78350f;border-radius:8px;padding:12px;font-size:13px;color:#fde68a;">
+          ⚠️ Aucune facture enregistrée sur ce dossier. Créez d'abord une facture dans l'onglet 🧾 Facture.
+        </div>` : ""}
+
+      <!-- Boutons rapides -->
+      <div>
+        <p style="font-size:12px;color:#64748b;margin-bottom:8px;">⚡ Encaissement rapide :</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Espèces',${montantFacture})"       style="background:#14532d;font-size:13px;">💵 Tout en espèces</button>
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Carte bancaire',${montantFacture})" style="background:#1e40af;font-size:13px;">💳 Tout par CB</button>
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Chèque',${montantFacture})"        style="background:#78350f;font-size:13px;">📝 Tout par chèque</button>
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Assurance',${montantFacture})"     style="background:#7c3aed;font-size:13px;">🛡 Assurance</button>
+        </div>
+      </div>
+
+      <!-- Encaissement partiel -->
+      <div style="background:#0f172a;border-radius:8px;padding:12px;">
+        <p style="font-size:12px;color:#94a3b8;margin-bottom:8px;">💰 Encaissement partiel ou personnalisé :</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div style="flex:1;min-width:110px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Montant encaissé (€)</label>
+            <input type="number" id="encMontant" value="${solde>0?solde.toFixed(2):montantFacture.toFixed(2)}" step="0.01" min="0" style="width:100%;box-sizing:border-box;font-size:15px;font-weight:bold;">
+          </div>
+          <div style="min-width:130px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Mode de paiement</label>
+            <select id="encMode" style="width:100%;box-sizing:border-box;">
+              ${["Espèces","Chèque","Carte bancaire","Virement","Assurance","Mixte"].map(m=>`<option value="${m}" ${(d.modePaiement||""===m)?"selected":""}>${m}</option>`).join("")}
+            </select>
+          </div>
+          <div style="min-width:120px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Date</label>
+            <input type="date" id="encDate" value="${new Date().toISOString().split("T")[0]}" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div style="flex:1;min-width:110px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Référence (chèque, etc.)</label>
+            <input type="text" id="encRef" placeholder="N° chèque, ref virement..." style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+        <button onclick="validerEncaissement(${index},'${typeDossier}')" class="btn-success" style="width:100%;margin-top:10px;font-size:14px;">✅ Valider l'encaissement</button>
+      </div>
+
+    </div>`;
+}
+
+function encaissementRapide(index, typeDossier, mode, montant){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  if(montant <= 0){ toast("Aucune facture à encaisser","error"); return; }
+
+  d.montantEncaisse  = montant.toFixed(2);
+  d.modePaiement     = mode;
+  d.dateEncaissement = new Date().toISOString().split("T")[0];
+  d.statutPaiement   = "Réglé";
+  d.statut           = "Facturé";
+
+  if(!Array.isArray(d.historiqueEncaissements)) d.historiqueEncaissements = [];
+  d.historiqueEncaissements.push({ date:d.dateEncaissement, montant, mode, ref:"", type:"complet" });
+
+  if(typeDossier==="mecanique"){ saveData(); renderDossiersMecanique(); }
+  else { saveData(); renderDossiers(); }
+
+  toast(`✅ ${montant.toLocaleString("fr-FR",{minimumFractionDigits:2})} € encaissé en ${mode}`);
+  afficherOngletFinancier("encaissement", index, typeDossier);
+}
+
+function validerEncaissement(index, typeDossier){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+
+  const montant = parseFloat(document.getElementById("encMontant")?.value||"0");
+  const mode    = document.getElementById("encMode")?.value||"Espèces";
+  const date    = document.getElementById("encDate")?.value||new Date().toISOString().split("T")[0];
+  const ref     = document.getElementById("encRef")?.value.trim()||"";
+
+  if(montant <= 0){ toast("Montant obligatoire","error"); return; }
+
+  const ancienEncaisse = parseFloat(d.montantEncaisse||0);
+  const nouvelEncaisse = ancienEncaisse + montant;
+  const facture = parseFloat(d.facture||0);
+
+  d.montantEncaisse  = nouvelEncaisse.toFixed(2);
+  d.modePaiement     = mode;
+  d.dateEncaissement = date;
+  d.statutPaiement   = nouvelEncaisse >= facture && facture > 0 ? "Réglé" : "Partiel";
+  if(d.statutPaiement === "Réglé") d.statut = "Facturé";
+
+  if(!Array.isArray(d.historiqueEncaissements)) d.historiqueEncaissements = [];
+  d.historiqueEncaissements.push({ date, montant, mode, ref, type: d.statutPaiement==="Réglé"?"complet":"partiel" });
+
+  if(typeDossier==="mecanique"){ saveData(); renderDossiersMecanique(); }
+  else { saveData(); renderDossiers(); }
+
+  toast(`✅ ${montant.toLocaleString("fr-FR",{minimumFractionDigits:2})} € encaissé — Statut : ${d.statutPaiement}`);
+  afficherOngletFinancier("encaissement", index, typeDossier);
+}
+
+/* ── Historique financier ── */
+function afficherHistoriqueFinancier(zone, index, typeDossier){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  const historique = d.historiqueEncaissements||[];
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  zone.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <h3 style="color:#f59e0b;margin:0;">📜 Historique des encaissements</h3>
+      ${historique.length === 0
+        ? `<p style="color:#64748b;font-size:13px;">Aucun encaissement enregistré.</p>`
+        : `<div class="table-wrapper">
+            <table style="font-size:13px;">
+              <thead><tr><th>Date</th><th>Montant</th><th>Mode</th><th>Référence</th><th>Type</th></tr></thead>
+              <tbody>
+                ${historique.map(h=>`<tr>
+                  <td style="white-space:nowrap;">${escHtml(h.date||"—")}</td>
+                  <td style="font-weight:bold;color:#34d399;">${fmtE(h.montant)}</td>
+                  <td>${escHtml(h.mode||"—")}</td>
+                  <td style="color:#64748b;font-size:12px;">${escHtml(h.ref||"—")}</td>
+                  <td><span style="background:${h.type==="complet"?"#14532d":"#78350f"};padding:2px 7px;border-radius:4px;font-size:11px;">${h.type==="complet"?"✅ Complet":"⚠️ Partiel"}</span></td>
+                </tr>`).join("")}
+              </tbody>
+              <tfoot>
+                <tr style="background:#0f172a;font-weight:bold;">
+                  <td style="padding:8px;">Total encaissé</td>
+                  <td style="color:#34d399;">${fmtE(historique.reduce((a,h)=>a+(h.montant||0),0))}</td>
+                  <td colspan="3"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>`}
+      ${historique.length > 0 ? `
+        <button onclick="confirmerAction('Remettre l\\'encaissement à zéro ?', ()=>{ const d=${typeDossier}==='mecanique'?dossiersMecanique[${index}]:dossiers[${index}]; d.montantEncaisse=0; d.historiqueEncaissements=[]; d.statutPaiement='Non réglé'; saveData(); afficherOngletFinancier('historique',${index},'${typeDossier}'); toast('Encaissements réinitialisés'); })" style="background:#7f1d1d;font-size:12px;">🗑 Remettre à zéro</button>
+      ` : ""}
+    </div>`;
 }
