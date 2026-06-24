@@ -695,9 +695,11 @@
           <select id="typeDocument" onchange="majNumeroDocument()">
             <option value="devis">Devis</option>
             <option value="facture">Facture</option>
+            <option value="or">Ordre de Réparation</option>
           </select>
           <input type="date" id="dateDocument">
           <input type="text" id="technicienDocument" placeholder="Technicien">
+          <input type="number" id="coutAchatPieces" placeholder="Coût achat pièces HT (€)" step="0.01" min="0" title="Prix d'achat réel des pièces (pour calcul de marge)" oninput="majAffichageMarge()">
         </div>
 
       </div>
@@ -757,7 +759,10 @@
           </table>
         </div>
 
-        <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+        <!-- Aperçu marge temps réel -->
+        <div id="aperçuMarge" style="margin-top:12px;padding:10px 14px;background:#0f172a;border-radius:8px;border:1px solid #1e293b;min-height:0;"></div>
+
+        <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
           <button onclick="genererPdfDocument()">📄 Générer PDF</button>
           <button onclick="sauvegarderDocument()" class="btn-success">💾 Sauvegarder</button>
           <button onclick="ouvrirTransfertVersDossier()" style="background:#7c3aed;">📂 Transférer vers dossier</button>
@@ -897,7 +902,26 @@
 
       <!-- Liste documents sauvegardés -->
       <div class="card">
-        <h2>📋 Documents enregistrés</h2>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+          <h2 style="margin:0;">📋 Documents enregistrés</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <select id="filtreTypeDoc" onchange="renderDocuments()" style="min-width:130px;">
+              <option value="">Tous types</option>
+              <option value="devis">Devis</option>
+              <option value="facture">Factures</option>
+              <option value="or">Ordres de réparation</option>
+            </select>
+            <select id="filtreReglementDoc" onchange="renderDocuments()" style="min-width:150px;">
+              <option value="">Tous règlements</option>
+              <option value="Non réglé">❌ Non réglé</option>
+              <option value="Partiel">⚠️ Partiel</option>
+              <option value="Réglé">✅ Réglé</option>
+              <option value="—">— (devis/OR)</option>
+            </select>
+            <button onclick="exporterDocumentsCSV()" style="background:#0891b2;font-size:12px;">📊 CSV</button>
+          </div>
+        </div>
+        <div id="resumeDocuments" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;"></div>
         <div class="table-wrapper">
           <table>
             <thead>
@@ -907,6 +931,8 @@
                 <th>Titre</th>
                 <th>Dossier</th>
                 <th>Total TTC</th>
+                <th>Marge</th>
+                <th>Règlement</th>
                 <th>Actions</th>
               </tr>
             </thead>
