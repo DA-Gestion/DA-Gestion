@@ -8465,59 +8465,141 @@ function afficherFormEncaissement(zone, index, typeDossier){
   const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
   const montantFacture  = parseFloat(d.facture||0);
   const montantEncaisse = parseFloat(d.montantEncaisse||0);
-  const solde = montantFacture - montantEncaisse;
+  const montantAvoir    = parseFloat(d.montantAvoir||0);
+  const solde = montantFacture - montantEncaisse - montantAvoir;
   const fmtE  = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+  const franchise = parseFloat(d.montantFranchise||0);
+  const today = new Date().toISOString().split("T")[0];
 
   zone.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:14px;">
 
-      <!-- Résumé -->
-      <div style="background:#0f172a;border-radius:8px;padding:12px;display:flex;gap:20px;flex-wrap:wrap;font-size:13px;">
-        <span>Facture : <b style="color:#a78bfa;">${fmtE(montantFacture)}</b></span>
-        <span>Encaissé : <b style="color:#34d399;">${fmtE(montantEncaisse)}</b></span>
-        <span>Reste dû : <b style="color:${solde>0?"#f87171":"#34d399"};">${fmtE(Math.max(0,solde))}</b></span>
+      <!-- Résumé financier -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;">
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #a78bfa;">
+          <div style="font-size:11px;color:#64748b;">Facture</div>
+          <div style="font-weight:bold;color:#a78bfa;">${fmtE(montantFacture)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;">Encaissé</div>
+          <div style="font-weight:bold;color:#34d399;">${fmtE(montantEncaisse)}</div>
+        </div>
+        ${montantAvoir>0?`
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #f59e0b;">
+          <div style="font-size:11px;color:#64748b;">Avoir</div>
+          <div style="font-weight:bold;color:#f59e0b;">- ${fmtE(montantAvoir)}</div>
+        </div>`:""}
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid ${solde>0?"#f87171":"#34d399"};">
+          <div style="font-size:11px;color:#64748b;">Solde dû</div>
+          <div style="font-weight:bold;color:${solde>0?"#f87171":"#34d399"};">${fmtE(Math.max(0,solde))}</div>
+        </div>
       </div>
 
       ${montantFacture <= 0 ? `
         <div style="background:#78350f;border-radius:8px;padding:12px;font-size:13px;color:#fde68a;">
-          ⚠️ Aucune facture enregistrée sur ce dossier. Créez d'abord une facture dans l'onglet 🧾 Facture.
+          ⚠️ Aucune facture enregistrée. Créez d'abord une facture dans l'onglet 🧾 Facture.
         </div>` : ""}
 
-      <!-- Boutons rapides -->
-      <div>
-        <p style="font-size:12px;color:#64748b;margin-bottom:8px;">⚡ Encaissement rapide :</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button onclick="encaissementRapide(${index},'${typeDossier}','Espèces',${montantFacture})"       style="background:#14532d;font-size:13px;">💵 Tout en espèces</button>
-          <button onclick="encaissementRapide(${index},'${typeDossier}','Carte bancaire',${montantFacture})" style="background:#1e40af;font-size:13px;">💳 Tout par CB</button>
-          <button onclick="encaissementRapide(${index},'${typeDossier}','Chèque',${montantFacture})"        style="background:#78350f;font-size:13px;">📝 Tout par chèque</button>
-          <button onclick="encaissementRapide(${index},'${typeDossier}','Assurance',${montantFacture})"     style="background:#7c3aed;font-size:13px;">🛡 Assurance</button>
+      <!-- ═══ MODE 1 : Paiement simple ═══ -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;border:1px solid #1e293b;">
+        <h4 style="color:#38bdf8;margin:0 0 10px 0;">⚡ Encaissement rapide</h4>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Espèces',${montantFacture})"        style="background:#14532d;font-size:12px;">💵 Tout espèces</button>
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Carte bancaire',${montantFacture})" style="background:#1e40af;font-size:12px;">💳 Tout CB</button>
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Chèque',${montantFacture})"         style="background:#78350f;font-size:12px;">📝 Tout chèque</button>
+          <button onclick="encaissementRapide(${index},'${typeDossier}','Assurance',${montantFacture})"      style="background:#7c3aed;font-size:12px;">🛡 Tout assurance</button>
         </div>
-      </div>
-
-      <!-- Encaissement partiel -->
-      <div style="background:#0f172a;border-radius:8px;padding:12px;">
-        <p style="font-size:12px;color:#94a3b8;margin-bottom:8px;">💰 Encaissement partiel ou personnalisé :</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
-          <div style="flex:1;min-width:110px;">
-            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Montant encaissé (€)</label>
-            <input type="number" id="encMontant" value="${solde>0?solde.toFixed(2):montantFacture.toFixed(2)}" step="0.01" min="0" style="width:100%;box-sizing:border-box;font-size:15px;font-weight:bold;">
+          <div style="flex:1;min-width:100px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Montant (€)</label>
+            <input type="number" id="encMontant" value="${solde>0?solde.toFixed(2):montantFacture.toFixed(2)}" step="0.01" min="0" style="width:100%;box-sizing:border-box;font-size:14px;font-weight:bold;">
           </div>
           <div style="min-width:130px;">
-            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Mode de paiement</label>
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Mode</label>
             <select id="encMode" style="width:100%;box-sizing:border-box;">
-              ${["Espèces","Chèque","Carte bancaire","Virement","Assurance","Mixte"].map(m=>`<option value="${m}" ${(d.modePaiement||""===m)?"selected":""}>${m}</option>`).join("")}
+              ${["Espèces","Chèque","Carte bancaire","Virement","Assurance"].map(m=>`<option value="${m}">${m}</option>`).join("")}
             </select>
           </div>
-          <div style="min-width:120px;">
+          <div style="min-width:115px;">
             <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Date</label>
-            <input type="date" id="encDate" value="${new Date().toISOString().split("T")[0]}" style="width:100%;box-sizing:border-box;">
+            <input type="date" id="encDate" value="${today}" style="width:100%;box-sizing:border-box;">
           </div>
-          <div style="flex:1;min-width:110px;">
-            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Référence (chèque, etc.)</label>
-            <input type="text" id="encRef" placeholder="N° chèque, ref virement..." style="width:100%;box-sizing:border-box;">
+          <div style="flex:1;min-width:100px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Référence</label>
+            <input type="text" id="encRef" placeholder="N° chèque, virement..." style="width:100%;box-sizing:border-box;">
           </div>
         </div>
-        <button onclick="validerEncaissement(${index},'${typeDossier}')" class="btn-success" style="width:100%;margin-top:10px;font-size:14px;">✅ Valider l'encaissement</button>
+        <button onclick="validerEncaissement(${index},'${typeDossier}')" class="btn-success" style="width:100%;margin-top:10px;">✅ Valider</button>
+      </div>
+
+      <!-- ═══ MODE 2 : Paiement mixte Assurance + Client ═══ -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;border:1px solid #7c3aed44;">
+        <h4 style="color:#a78bfa;margin:0 0 4px 0;">🛡 Paiement mixte — Assurance + Client (franchise)</h4>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px 0;">Saisir la part prise en charge par l'assurance et la franchise payée par le client séparément.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div style="flex:1;min-width:120px;">
+            <label style="font-size:11px;color:#a78bfa;display:block;margin-bottom:2px;">🛡 Part assurance (€)</label>
+            <input type="number" id="encAssurance" value="${franchise>0?(montantFacture-franchise).toFixed(2):""}" step="0.01" min="0"
+              placeholder="0.00" style="width:100%;box-sizing:border-box;font-size:14px;font-weight:bold;border-color:#7c3aed;"
+              oninput="majMixteClient(${montantFacture})">
+          </div>
+          <div style="flex:1;min-width:120px;">
+            <label style="font-size:11px;color:#34d399;display:block;margin-bottom:2px;">💵 Part client — franchise (€)</label>
+            <input type="number" id="encClient" value="${franchise>0?franchise.toFixed(2):""}" step="0.01" min="0"
+              placeholder="0.00" style="width:100%;box-sizing:border-box;font-size:14px;font-weight:bold;border-color:#16a34a;"
+              oninput="majMixteAssurance(${montantFacture})">
+          </div>
+          <div style="min-width:130px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Mode client</label>
+            <select id="encModeClient" style="width:100%;box-sizing:border-box;">
+              ${["Espèces","Chèque","Carte bancaire","Virement"].map(m=>`<option value="${m}">${m}</option>`).join("")}
+            </select>
+          </div>
+          <div style="min-width:115px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Réf. assurance</label>
+            <input type="text" id="encRefAssurance" placeholder="N° sinistre / accord" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div style="min-width:115px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Date</label>
+            <input type="date" id="encDateMixte" value="${today}" style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+        <div id="resumeMixte" style="margin-top:10px;padding:8px 12px;background:#1e293b;border-radius:6px;font-size:13px;display:flex;gap:16px;flex-wrap:wrap;">
+          <span>Total : <b id="mixteTotalAff" style="color:#38bdf8;">${fmtE(montantFacture)}</b></span>
+          <span>Assurance : <b id="mixteAssAff" style="color:#a78bfa;">—</b></span>
+          <span>Client : <b id="mixteCliAff" style="color:#34d399;">—</b></span>
+          <span id="mixteErreur" style="color:#f87171;display:none;">⚠️ Le total ne correspond pas au montant de la facture</span>
+        </div>
+        <button onclick="validerEncaissementMixte(${index},'${typeDossier}',${montantFacture})" style="background:#7c3aed;width:100%;margin-top:10px;">🛡 Valider paiement mixte</button>
+      </div>
+
+      <!-- ═══ MODE 3 : Avoir ═══ -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;border:1px solid #f59e0b44;">
+        <h4 style="color:#f59e0b;margin:0 0 4px 0;">📄 Émettre un avoir</h4>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px 0;">Un avoir réduit le solde dû sans encaissement. Il sera enregistré dans l'historique et visible sur le dossier.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div style="flex:1;min-width:120px;">
+            <label style="font-size:11px;color:#f59e0b;display:block;margin-bottom:2px;">Montant avoir (€)</label>
+            <input type="number" id="avoirMontant" placeholder="0.00" step="0.01" min="0" style="width:100%;box-sizing:border-box;font-size:14px;font-weight:bold;border-color:#f59e0b;">
+          </div>
+          <div style="min-width:115px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Date</label>
+            <input type="date" id="avoirDate" value="${today}" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div style="flex:2;min-width:160px;">
+            <label style="font-size:11px;color:#64748b;display:block;margin-bottom:2px;">Motif de l'avoir</label>
+            <input type="text" id="avoirMotif" placeholder="Ex: Remise commerciale, retour pièce, geste commercial..." style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <button onclick="validerAvoir(${index},'${typeDossier}')" style="background:#78350f;flex:1;">📄 Enregistrer l'avoir</button>
+          <button onclick="imprimerAvoir(${index},'${typeDossier}')" style="background:#0891b2;">🖨 PDF avoir</button>
+        </div>
+        ${montantAvoir>0?`
+        <div style="margin-top:10px;padding:8px 12px;background:#1e293b;border-radius:6px;font-size:12px;color:#f59e0b;">
+          📄 Avoir existant : <b>${fmtE(montantAvoir)}</b>
+          ${d.avoirMotif?` — ${escHtml(d.avoirMotif)}`:""}
+        </div>`:""}
       </div>
 
     </div>`;
@@ -8547,68 +8629,380 @@ function encaissementRapide(index, typeDossier, mode, montant){
 function validerEncaissement(index, typeDossier){
   const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
   if(!d) return;
-
   const montant = parseFloat(document.getElementById("encMontant")?.value||"0");
   const mode    = document.getElementById("encMode")?.value||"Espèces";
   const date    = document.getElementById("encDate")?.value||new Date().toISOString().split("T")[0];
   const ref     = document.getElementById("encRef")?.value.trim()||"";
-
   if(montant <= 0){ toast("Montant obligatoire","error"); return; }
+  _enregistrerEncaissement(d, montant, mode, date, ref, "");
+  if(typeDossier==="mecanique"){ saveData(); renderDossiersMecanique(); }
+  else { saveData(); renderDossiers(); }
+  toast(`✅ ${montant.toLocaleString("fr-FR",{minimumFractionDigits:2})} € encaissé — Statut : ${d.statutPaiement}`);
+  afficherOngletFinancier("encaissement", index, typeDossier);
+}
 
+function _enregistrerEncaissement(d, montant, mode, date, ref, label){
   const ancienEncaisse = parseFloat(d.montantEncaisse||0);
   const nouvelEncaisse = ancienEncaisse + montant;
   const facture = parseFloat(d.facture||0);
-
+  const avoir   = parseFloat(d.montantAvoir||0);
   d.montantEncaisse  = nouvelEncaisse.toFixed(2);
   d.modePaiement     = mode;
   d.dateEncaissement = date;
-  d.statutPaiement   = nouvelEncaisse >= facture && facture > 0 ? "Réglé" : "Partiel";
+  d.statutPaiement   = (nouvelEncaisse + avoir) >= facture && facture > 0 ? "Réglé" : "Partiel";
   if(d.statutPaiement === "Réglé") d.statut = "Facturé";
+  if(!Array.isArray(d.historiqueEncaissements)) d.historiqueEncaissements = [];
+  d.historiqueEncaissements.push({
+    date, montant, mode, ref,
+    label: label||"",
+    type: d.statutPaiement==="Réglé" ? "complet" : "partiel"
+  });
+}
+
+function majMixteClient(total){
+  const ass = parseFloat(document.getElementById("encAssurance")?.value||"0")||0;
+  const cli = total - ass;
+  const el  = document.getElementById("encClient");
+  if(el) el.value = cli > 0 ? cli.toFixed(2) : "0.00";
+  _majResumeMixte(total);
+}
+
+function majMixteAssurance(total){
+  const cli = parseFloat(document.getElementById("encClient")?.value||"0")||0;
+  const ass = total - cli;
+  const el  = document.getElementById("encAssurance");
+  if(el) el.value = ass > 0 ? ass.toFixed(2) : "0.00";
+  _majResumeMixte(total);
+}
+
+function _majResumeMixte(total){
+  const ass = parseFloat(document.getElementById("encAssurance")?.value||"0")||0;
+  const cli = parseFloat(document.getElementById("encClient")?.value||"0")||0;
+  const fmt = v => v.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+  const setT = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  setT("mixteAssAff", fmt(ass));
+  setT("mixteCliAff", fmt(cli));
+  const errEl = document.getElementById("mixteErreur");
+  const diff = Math.abs(ass+cli-total);
+  if(errEl) errEl.style.display = diff > 0.01 ? "" : "none";
+}
+
+function validerEncaissementMixte(index, typeDossier, totalFacture){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  const partAss = parseFloat(document.getElementById("encAssurance")?.value||"0")||0;
+  const partCli = parseFloat(document.getElementById("encClient")?.value||"0")||0;
+  const modeClient = document.getElementById("encModeClient")?.value||"Espèces";
+  const refAss  = document.getElementById("encRefAssurance")?.value.trim()||"";
+  const date    = document.getElementById("encDateMixte")?.value||new Date().toISOString().split("T")[0];
+
+  if(partAss <= 0 && partCli <= 0){ toast("Saisissez au moins un montant","error"); return; }
+  const total = partAss + partCli;
+  if(Math.abs(total - totalFacture) > 0.05){
+    if(!confirm(`Le total (${total.toFixed(2)} €) ne correspond pas à la facture (${totalFacture.toFixed(2)} €). Continuer quand même ?`)) return;
+  }
 
   if(!Array.isArray(d.historiqueEncaissements)) d.historiqueEncaissements = [];
-  d.historiqueEncaissements.push({ date, montant, mode, ref, type: d.statutPaiement==="Réglé"?"complet":"partiel" });
+  let nouveauTotal = parseFloat(d.montantEncaisse||0);
+
+  if(partAss > 0){
+    d.historiqueEncaissements.push({ date, montant:partAss, mode:"Assurance", ref:refAss, label:"Part assurance", type:"mixte" });
+    nouveauTotal += partAss;
+  }
+  if(partCli > 0){
+    d.historiqueEncaissements.push({ date, montant:partCli, mode:modeClient, ref:"", label:"Franchise client", type:"mixte" });
+    nouveauTotal += partCli;
+  }
+
+  const facture = parseFloat(d.facture||0);
+  const avoir   = parseFloat(d.montantAvoir||0);
+  d.montantEncaisse  = nouveauTotal.toFixed(2);
+  d.dateEncaissement = date;
+  d.modePaiement     = "Mixte (Assurance + "+modeClient+")";
+  d.statutPaiement   = (nouveauTotal + avoir) >= facture && facture > 0 ? "Réglé" : "Partiel";
+  if(d.statutPaiement === "Réglé") d.statut = "Facturé";
 
   if(typeDossier==="mecanique"){ saveData(); renderDossiersMecanique(); }
   else { saveData(); renderDossiers(); }
 
-  toast(`✅ ${montant.toLocaleString("fr-FR",{minimumFractionDigits:2})} € encaissé — Statut : ${d.statutPaiement}`);
+  toast(`✅ Paiement mixte enregistré : Assurance ${partAss.toFixed(2)} € + Client ${partCli.toFixed(2)} €`);
   afficherOngletFinancier("encaissement", index, typeDossier);
+}
+
+function validerAvoir(index, typeDossier){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  const montant = parseFloat(document.getElementById("avoirMontant")?.value||"0");
+  const date    = document.getElementById("avoirDate")?.value||new Date().toISOString().split("T")[0];
+  const motif   = document.getElementById("avoirMotif")?.value.trim()||"Avoir";
+  if(montant <= 0){ toast("Montant de l'avoir obligatoire","error"); return; }
+  const facture = parseFloat(d.facture||0);
+  if(montant > facture){ toast("L'avoir ne peut pas dépasser le montant de la facture","error"); return; }
+
+  const ancienAvoir = parseFloat(d.montantAvoir||0);
+  d.montantAvoir  = (ancienAvoir + montant).toFixed(2);
+  d.avoirMotif    = motif;
+  d.avoirDate     = date;
+
+  const encaisse = parseFloat(d.montantEncaisse||0);
+  d.statutPaiement = (encaisse + parseFloat(d.montantAvoir)) >= facture && facture > 0 ? "Réglé" : "Partiel";
+  if(d.statutPaiement === "Réglé") d.statut = "Facturé";
+
+  if(!Array.isArray(d.historiqueEncaissements)) d.historiqueEncaissements = [];
+  d.historiqueEncaissements.push({ date, montant, mode:"Avoir", ref:motif, label:"Avoir", type:"avoir" });
+
+  if(typeDossier==="mecanique"){ saveData(); renderDossiersMecanique(); }
+  else { saveData(); renderDossiers(); }
+
+  toast(`📄 Avoir de ${montant.toLocaleString("fr-FR",{minimumFractionDigits:2})} € enregistré ✓`);
+  afficherOngletFinancier("encaissement", index, typeDossier);
+}
+
+function imprimerAvoir(index, typeDossier){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d){ toast("Dossier introuvable","error"); return; }
+  const montantAvoir = parseFloat(document.getElementById("avoirMontant")?.value||d.montantAvoir||0);
+  const motif  = document.getElementById("avoirMotif")?.value.trim()||d.avoirMotif||"Avoir";
+  const date   = document.getElementById("avoirDate")?.value||d.avoirDate||new Date().toISOString().split("T")[0];
+  if(montantAvoir <= 0){ toast("Saisissez d'abord un montant d'avoir","error"); return; }
+  if(!window.jspdf){ toast("Bibliothèque PDF non chargée","error"); return; }
+
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF();
+  const e   = entreprise;
+  const num = `AV-${d.numero}-${Date.now().toString().slice(-4)}`;
+
+  // En-tête rouge
+  pdf.setFillColor(127,29,29); pdf.rect(0,0,210,30,"F");
+  pdf.setTextColor(255,255,255);
+  pdf.setFontSize(20); pdf.setFont(undefined,"bold");
+  pdf.text("AVOIR", 105, 14, {align:"center"});
+  pdf.setFontSize(9); pdf.setFont(undefined,"normal");
+  pdf.text(`N° ${num} — Date : ${new Date(date+"T00:00:00").toLocaleDateString("fr-FR")}`, 105, 22, {align:"center"});
+
+  let y = 38;
+  pdf.setTextColor(0,0,0); pdf.setFontSize(9);
+
+  // Infos émetteur
+  if(e.nom){ pdf.setFont(undefined,"bold"); pdf.text(e.nom, 14, y); pdf.setFont(undefined,"normal"); y+=5; }
+  if(e.adresse){ pdf.text(e.adresse, 14, y); y+=4; }
+  if(e.siret)  { pdf.text("SIRET : "+e.siret, 14, y); y+=4; }
+
+  // Infos client
+  pdf.setFillColor(241,245,249); pdf.rect(110,35,86,22,"F");
+  pdf.setFontSize(9); pdf.setFont(undefined,"bold"); pdf.text("CLIENT", 112, 41);
+  pdf.setFont(undefined,"normal");
+  pdf.text(d.client||"", 112, 47);
+  pdf.text(d.immat||d.vehicule||"", 112, 52);
+
+  y = Math.max(y, 62);
+
+  // Facture d'origine
+  pdf.setFillColor(241,245,249); pdf.rect(14,y,182,10,"F");
+  pdf.setFontSize(9); pdf.setFont(undefined,"bold");
+  pdf.text("Avoir sur dossier : "+d.numero, 16, y+7);
+  pdf.text("Facture d'origine : "+d.facture+" €", 130, y+7);
+  y += 16;
+
+  // Motif
+  pdf.setFont(undefined,"normal");
+  pdf.text("Motif : "+motif, 14, y); y += 10;
+
+  // Montant
+  pdf.setDrawColor(200); pdf.line(14,y,196,y); y += 8;
+  pdf.setFont(undefined,"bold"); pdf.setFontSize(14);
+  pdf.text("Montant de l'avoir :", 14, y);
+  pdf.setTextColor(127,29,29);
+  pdf.text("- "+montantAvoir.toLocaleString("fr-FR",{minimumFractionDigits:2})+" €", 194, y, {align:"right"});
+  pdf.setTextColor(0,0,0); y += 12;
+
+  // Nouveau solde
+  const facture = parseFloat(d.facture||0);
+  pdf.setFontSize(10); pdf.setFont(undefined,"normal");
+  pdf.text(`Facture d'origine : ${facture.toFixed(2)} €`, 14, y); y+=6;
+  pdf.text(`Déduction avoir : - ${montantAvoir.toFixed(2)} €`, 14, y); y+=6;
+  pdf.setFont(undefined,"bold");
+  pdf.text(`Net à payer : ${(facture-montantAvoir).toFixed(2)} €`, 14, y);
+
+  // Mentions
+  const pageH = pdf.internal.pageSize.height;
+  pdf.setFontSize(7); pdf.setTextColor(130,130,130); let my=pageH-16;
+  if(e.siret) { pdf.text("SIRET : "+e.siret+(e.tva?" — TVA : "+e.tva:""), 14, my); my+=4; }
+  pdf.text("Document comptable — Avoir non remboursable sauf mention contraire.", 14, my);
+
+  pdf.save(`Avoir-${num}.pdf`);
+  toast("PDF avoir généré ✓");
 }
 
 /* ── Historique financier ── */
 function afficherHistoriqueFinancier(zone, index, typeDossier){
   const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
   const historique = d.historiqueEncaissements||[];
-  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" \u20ac";
+  const facture = parseFloat(d.facture||0);
+  const totalEncaisse = historique.filter(h=>h.type!=="avoir" && h.type!=="annule").reduce((a,h)=>a+(h.montant||0),0);
+  const totalAvoirs   = historique.filter(h=>h.type==="avoir").reduce((a,h)=>a+(h.montant||0),0);
+  const soldeReel     = facture - totalEncaisse - totalAvoirs;
 
   zone.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:12px;">
-      <h3 style="color:#f59e0b;margin:0;">📜 Historique des encaissements</h3>
-      ${historique.length === 0
-        ? `<p style="color:#64748b;font-size:13px;">Aucun encaissement enregistré.</p>`
+      <div style="display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;background:#0f172a;border-radius:8px;font-size:13px;">
+        <span>Facture\u00a0: <b style="color:#a78bfa;">${fmtE(facture)}</b></span>
+        <span>Encaiss\u00e9\u00a0: <b style="color:#34d399;">${fmtE(totalEncaisse)}</b></span>
+        ${totalAvoirs>0?`<span>Avoirs\u00a0: <b style="color:#f59e0b;">- ${fmtE(totalAvoirs)}</b></span>`:""}
+        <span>Solde\u00a0: <b style="color:${soldeReel>0?"#f87171":"#34d399"};">${fmtE(Math.max(0,soldeReel))}</b></span>
+      </div>
+
+      ${historique.length===0
+        ? `<p style="color:#64748b;font-size:13px;">Aucun mouvement enregistr\u00e9.</p>`
         : `<div class="table-wrapper">
-            <table style="font-size:13px;">
-              <thead><tr><th>Date</th><th>Montant</th><th>Mode</th><th>Référence</th><th>Type</th></tr></thead>
+            <table style="font-size:12px;">
+              <thead><tr>
+                <th>Date</th><th>Montant</th><th>Mode / Label</th><th>R\u00e9f\u00e9rence</th><th>Type</th><th>Action</th>
+              </tr></thead>
               <tbody>
-                ${historique.map(h=>`<tr>
-                  <td style="white-space:nowrap;">${escHtml(h.date||"—")}</td>
-                  <td style="font-weight:bold;color:#34d399;">${fmtE(h.montant)}</td>
-                  <td>${escHtml(h.mode||"—")}</td>
-                  <td style="color:#64748b;font-size:12px;">${escHtml(h.ref||"—")}</td>
-                  <td><span style="background:${h.type==="complet"?"#14532d":"#78350f"};padding:2px 7px;border-radius:4px;font-size:11px;">${h.type==="complet"?"✅ Complet":"⚠️ Partiel"}</span></td>
-                </tr>`).join("")}
+                ${historique.map((h,hi)=>{
+                  const annule=h.type==="annule"||h.type==="correction";
+                  const bgRow=annule?"background:rgba(100,116,139,0.12);":h.type==="avoir"?"background:rgba(127,29,29,0.15)":"";
+                  const mColor=annule?"#64748b":h.type==="avoir"?"#f59e0b":"#34d399";
+                  const typeBg=annule?"#334155":h.type==="avoir"?"#78350f":h.type==="complet"?"#14532d":h.type==="mixte"?"#1e40af":"#78350f";
+                  const typeLabel=annule?(h.type==="correction"?"✏️ Correction":"❌ Annul\u00e9"):h.type==="avoir"?"📄 Avoir":h.type==="complet"?"✅ R\u00e9gl\u00e9":h.type==="mixte"?"🛡 Mixte":"⚠️ Partiel";
+                  return `<tr style="${bgRow}">
+                    <td style="white-space:nowrap;">${escHtml(h.date||"—")}</td>
+                    <td style="font-weight:bold;color:${mColor};">${h.type==="avoir"?"- ":""}${fmtE(h.montant)}</td>
+                    <td>${escHtml(h.label||h.mode||"—")}</td>
+                    <td style="color:#64748b;font-size:11px;">${escHtml(h.ref||"—")}</td>
+                    <td><span style="background:${typeBg};padding:2px 6px;border-radius:4px;font-size:11px;">${typeLabel}</span></td>
+                    <td>${annule
+                      ? `<span style="font-size:11px;color:#475569;">Annul\u00e9</span>`
+                      : `<button onclick="annulerLigneEncaissement(${index},'${typeDossier}',${hi})" style="background:#7f1d1d;font-size:11px;padding:2px 7px;">↩ Annuler</button>`
+                    }</td>
+                  </tr>`;
+                }).join("")}
               </tbody>
-              <tfoot>
-                <tr style="background:#0f172a;font-weight:bold;">
-                  <td style="padding:8px;">Total encaissé</td>
-                  <td style="color:#34d399;">${fmtE(historique.reduce((a,h)=>a+(h.montant||0),0))}</td>
-                  <td colspan="3"></td>
-                </tr>
-              </tfoot>
             </table>
           </div>`}
-      ${historique.length > 0 ? `
-        <button onclick="confirmerAction('Remettre l\\'encaissement à zéro ?', ()=>{ const d=${typeDossier}==='mecanique'?dossiersMecanique[${index}]:dossiers[${index}]; d.montantEncaisse=0; d.historiqueEncaissements=[]; d.statutPaiement='Non réglé'; saveData(); afficherOngletFinancier('historique',${index},'${typeDossier}'); toast('Encaissements réinitialisés'); })" style="background:#7f1d1d;font-size:12px;">🗑 Remettre à zéro</button>
-      ` : ""}
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button onclick="recalculerDepuisHistorique(${index},'${typeDossier}')" style="background:#0891b2;font-size:12px;">🔄 Recalculer</button>
+        <button onclick="corrigerMontantEncaisse(${index},'${typeDossier}')" style="background:#78350f;font-size:12px;">✏️ Correction manuelle</button>
+        <button onclick="toutAZeroEncaissement(${index},'${typeDossier}')" style="background:#7f1d1d;font-size:12px;">🗑 Tout à zéro</button>
+      </div>
     </div>`;
 }
+
+function annulerLigneEncaissement(index, typeDossier, hi){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d||!d.historiqueEncaissements?.[hi]) return;
+  const h = d.historiqueEncaissements[hi];
+  // confirm() natif : évite le conflit avec la modal parent déjà ouverte
+  if(!window.confirm(`Annuler ce mouvement ?\n\n${h.label||h.mode} — ${Number(h.montant).toLocaleString("fr-FR",{minimumFractionDigits:2})} € — ${h.date}\n\nLe mouvement sera marqué Annulé.`)) return;
+  d.historiqueEncaissements[hi].type = "annule";
+  d.historiqueEncaissements[hi].annuleLe = new Date().toISOString().split("T")[0];
+  recalculerDepuisHistorique(index, typeDossier, true);
+  toast("Mouvement annulé ✓");
+}
+
+function toutAZeroEncaissement(index, typeDossier){
+  if(!window.confirm("Remettre TOUS les encaissements à zéro ?\nCette action est irréversible.")) return;
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  d.montantEncaisse=0; d.montantAvoir=0; d.historiqueEncaissements=[];
+  d.statutPaiement="Non réglé";
+  if(typeDossier==="mecanique"){saveData();renderDossiersMecanique();}
+  else{saveData();renderDossiers();}
+  toast("Encaissements réinitialisés");
+  afficherOngletFinancier("historique", index, typeDossier);
+}
+
+function recalculerDepuisHistorique(index, typeDossier, silencieux){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  const historique = d.historiqueEncaissements||[];
+  const totalEnc = historique.filter(h=>h.type!=="avoir"&&h.type!=="annule").reduce((a,h)=>a+(h.montant||0),0);
+  const totalAv  = historique.filter(h=>h.type==="avoir").reduce((a,h)=>a+(h.montant||0),0);
+  const facture  = parseFloat(d.facture||0);
+  d.montantEncaisse = totalEnc.toFixed(2);
+  d.montantAvoir    = totalAv.toFixed(2);
+  d.statutPaiement  = (totalEnc+totalAv)>=facture&&facture>0?"R\u00e9gl\u00e9":totalEnc+totalAv>0?"Partiel":"Non r\u00e9gl\u00e9";
+  if(d.statutPaiement==="R\u00e9gl\u00e9") d.statut="Factur\u00e9";
+  if(typeDossier==="mecanique"){saveData();renderDossiersMecanique();}
+  else{saveData();renderDossiers();}
+  if(!silencieux) toast("Totaux recalcul\u00e9s \u2713");
+  afficherOngletFinancier("historique", index, typeDossier);
+}
+
+function corrigerMontantEncaisse(index, typeDossier){
+  const d = typeDossier==="mecanique" ? dossiersMecanique[index] : dossiers[index];
+  if(!d) return;
+  const zone = document.getElementById("contenuOngletFinancier");
+  if(!zone) return;
+  const facture = parseFloat(d.facture||0);
+  const enc     = parseFloat(d.montantEncaisse||0);
+  const avoir   = parseFloat(d.montantAvoir||0);
+
+  // Afficher un panneau inline sous l'historique, pas une modal
+  const panneau = document.getElementById("panneauCorrection");
+  if(panneau){ panneau.remove(); return; } // toggle
+
+  const div = document.createElement("div");
+  div.id = "panneauCorrection";
+  div.style.cssText = "background:#1e293b;border:1px solid #f59e0b;border-radius:10px;padding:16px;margin-top:12px;display:flex;flex-direction:column;gap:12px;";
+  div.innerHTML = `
+    <h4 style="color:#f59e0b;margin:0;">✏️ Correction manuelle</h4>
+    <div style="background:#78350f;border-radius:6px;padding:8px 12px;font-size:12px;color:#fde68a;">
+      ⚠️ Utilisez uniquement pour corriger une erreur. La correction sera tracée.
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:120px;">
+        <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:3px;">Montant encaissé corrigé (€)</label>
+        <input type="number" id="corrMontant" value="${enc.toFixed(2)}" step="0.01" min="0"
+          style="width:100%;box-sizing:border-box;font-size:15px;font-weight:bold;">
+      </div>
+      <div style="flex:1;min-width:120px;">
+        <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:3px;">Montant avoir corrigé (€)</label>
+        <input type="number" id="corrAvoir" value="${avoir.toFixed(2)}" step="0.01" min="0"
+          style="width:100%;box-sizing:border-box;font-size:15px;">
+      </div>
+    </div>
+    <div>
+      <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:3px;">Motif de la correction *</label>
+      <input type="text" id="corrMotif" placeholder="Ex: Erreur de saisie — doublon encaissement"
+        style="width:100%;box-sizing:border-box;">
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button id="btnValiderCorrection" class="btn-success" style="flex:1;font-size:14px;">✅ Valider la correction</button>
+      <button onclick="document.getElementById('panneauCorrection').remove()" style="background:#334155;">✖ Annuler</button>
+    </div>`;
+
+  zone.appendChild(div);
+
+  document.getElementById("btnValiderCorrection").onclick = function(){
+    const montant = parseFloat(document.getElementById("corrMontant")?.value||"0");
+    const avoir2  = parseFloat(document.getElementById("corrAvoir")?.value||"0");
+    const motif   = document.getElementById("corrMotif")?.value.trim();
+    if(!motif){ toast("Motif obligatoire","error"); return; }
+
+    if(!Array.isArray(d.historiqueEncaissements)) d.historiqueEncaissements = [];
+    d.historiqueEncaissements.push({
+      date:  new Date().toISOString().split("T")[0],
+      montant, mode:"Correction", ref: motif,
+      label: `Correction manuelle (ancien: ${enc.toFixed(2)} €)`,
+      type:  "correction"
+    });
+
+    d.montantEncaisse = montant.toFixed(2);
+    d.montantAvoir    = avoir2.toFixed(2);
+    d.statutPaiement  = (montant+avoir2) >= facture && facture > 0 ? "Réglé"
+                      : (montant+avoir2) > 0 ? "Partiel" : "Non réglé";
+    if(d.statutPaiement === "Réglé") d.statut = "Facturé";
+
+    if(typeDossier==="mecanique"){ saveData(); renderDossiersMecanique(); }
+    else { saveData(); renderDossiers(); }
+
+    toast(`Correction enregistrée : ${montant.toFixed(2)} € ✓`);
+    afficherOngletFinancier("historique", index, typeDossier);
+  };
+}
+
+
