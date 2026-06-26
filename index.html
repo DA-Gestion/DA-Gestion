@@ -52,18 +52,18 @@
       <div class="nav-section-label">👤 CLIENTS</div>
       <a href="#" onclick="showPage('clients');setActive(this)">👤 Clients</a>
       <a href="#" onclick="showPage('vehicules');setActive(this)">🚗 Véhicules &amp; Historique</a>
-      <a href="#" onclick="showPage('agenda');setActive(this)">📅 Rendez-vous &amp; Planning</a>
+      <a href="#" onclick="showPage('agenda');setActive(this)">📅 Rendez-vous <span id="badgeRdv" style="background:#16a34a;color:#fff;border-radius:9999px;padding:1px 6px;font-size:11px;margin-left:4px;display:none;"></span></a>
 
       <!-- ── DOSSIERS ── -->
       <div class="nav-section-label">📁 DOSSIERS</div>
-      <a href="#" onclick="showPage('dossiers');setActive(this)">🪟 Vitrage</a>
-      <a href="#" onclick="showPage('mecanique');setActive(this)">🔩 Mécanique</a>
+      <a href="#" onclick="showPage('dossiers');setActive(this)">🪟 Vitrage <span id="badgeVitrage" style="background:#0891b2;color:#fff;border-radius:9999px;padding:1px 6px;font-size:11px;margin-left:4px;display:none;"></span></a>
+      <a href="#" onclick="showPage('mecanique');setActive(this)">🔩 Mécanique <span id="badgeMeca" style="background:#7c3aed;color:#fff;border-radius:9999px;padding:1px 6px;font-size:11px;margin-left:4px;display:none;"></span></a>
       <a href="#" onclick="showPage('assurances');setActive(this)">🛡 Assurances</a>
       <a href="#" onclick="showPage('relancesAssurance');setActive(this)">📨 Relances <span id="badgeRelances" style="background:#dc2626;color:#fff;border-radius:9999px;padding:1px 7px;font-size:11px;margin-left:4px;font-weight:bold;"></span></a>
 
       <!-- ── FACTURATION ── -->
       <div class="nav-section-label">💰 FACTURATION</div>
-      <a href="#" onclick="showPage('devisFacture');setActive(this)">🧾 Devis &amp; Factures</a>
+      <a href="#" onclick="showPage('devisFacture');setActive(this)">🧾 Devis &amp; Factures <span id="badgeImpaye" style="background:#dc2626;color:#fff;border-radius:9999px;padding:1px 6px;font-size:11px;margin-left:4px;display:none;"></span></a>
       <a href="#" onclick="showPage('stockPieces');setActive(this)">📦 Stock <span id="badgeStock" style="background:#dc2626;color:#fff;border-radius:9999px;padding:1px 7px;font-size:11px;margin-left:4px;font-weight:bold;display:none;"></span></a>
 
       <!-- ── STATS ── -->
@@ -79,8 +79,12 @@
     </nav>
 
     <div class="sidebar-footer">
-      <div id="bandeauFirebase" style="text-align:center;font-size:12px;padding:6px;margin-bottom:8px;background:#0f172a;border-radius:6px;border:1px solid #1e293b;" title="Statut synchronisation">
-        <span style="color:#64748b;">⏳ Connexion...</span>
+      <div id="bandeauFirebase" style="text-align:center;font-size:12px;padding:8px 10px;margin-bottom:8px;background:#0f172a;border-radius:8px;border:1px solid #1e293b;cursor:pointer;" title="Statut synchronisation Firebase" onclick="afficherStatutFirebase()">
+        <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+          <span id="fbDot" style="width:8px;height:8px;border-radius:50%;background:#64748b;display:inline-block;flex-shrink:0;"></span>
+          <span id="fbLabel" style="color:#64748b;">⏳ Connexion...</span>
+        </div>
+        <div id="fbLastSync" style="font-size:10px;color:#334155;margin-top:3px;display:none;"></div>
       </div>
       <div id="indicateurSauvegarde" style="display:none;align-items:center;gap:8px;background:#7c2d12;border:1px solid #ea580c;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#fed7aa;">
         ⚠️ Données non sauvegardées
@@ -88,6 +92,11 @@
       </div>
       <div id="bandeauOffline" style="display:none;align-items:center;gap:8px;background:#7f1d1d;border:1px solid #dc2626;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:#fca5a5;">
         📵 Mode hors-ligne
+      </div>
+      <!-- Notifications -->
+      <div id="zoneNotifications" style="display:none;background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;border:1px solid #334155;">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;font-weight:bold;">🔔 Alertes</div>
+        <div id="listeNotifications" style="display:flex;flex-direction:column;gap:5px;"></div>
       </div>
       <a href="#" onclick="afficherHistorique();return false;" style="font-size:12px;color:#475569;text-align:center;display:block;margin-bottom:6px;text-decoration:none;">📋 Historique actions</a>
       <div class="version-info">DA-Gestion v2</div>
@@ -327,6 +336,9 @@
           <tbody id="listeClients"></tbody>
         </table>
       </div>
+
+      <!-- Fiche client détaillée -->
+      <div id="ficheClientDetail" style="display:none;margin-top:20px;"></div>
 
     </section>
 

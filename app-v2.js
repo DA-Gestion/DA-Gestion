@@ -678,43 +678,83 @@ function toast(message, type="success"){
 
 
 function rechercheGlobale(terme){
-  if(!terme || terme.length < 2){ document.getElementById("resultatsRecherche").style.display="none"; return; }
+  const zone = document.getElementById("resultatsRecherche");
+  if(!terme || terme.length < 2){ zone.style.display="none"; return; }
   const t = terme.toLowerCase();
   const resultats = [];
 
+  // Dossiers vitrage
   dossiers.forEach((d,i)=>{
-    const texte = `${d.numero} ${d.client} ${d.vehicule} ${d.immat} ${d.sinistre} ${d.assurance}`.toLowerCase();
-    if(texte.includes(t)) resultats.push({ type:"📁 Dossier", label:`N°${d.numero} — ${d.client} — ${d.vehicule} (${d.immat||"—"})`, action:`ouvrirDossier(${i})` });
+    const texte = `${d.numero} ${d.client} ${d.vehicule} ${d.immat||""} ${d.sinistre||""} ${d.assurance||""} ${d.telephone||""} ${d.statut||""}`.toLowerCase();
+    if(texte.includes(t)){
+      const montant = d.facture || d.devis || "";
+      resultats.push({ type:"🪟 Vitrage", label:`N°${d.numero} — ${d.client} — ${d.immat||"—"}${montant?" — "+Number(montant).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":""}`, action:`ouvrirDossier(${i})`, statut:d.statut });
+    }
   });
+
+  // Clients
   clients.forEach((c,i)=>{
-    const texte = `${c.nom} ${c.prenom} ${c.telephone}`.toLowerCase();
-    if(texte.includes(t)) resultats.push({ type:"👤 Client", label:`${c.nom} ${c.prenom||""} — ${c.telephone||""}`, action:`showPage('clients')` });
+    const texte = `${c.nom} ${c.prenom||""} ${c.telephone||""} ${c.email||""} ${c.adresse||""}`.toLowerCase();
+    if(texte.includes(t)) resultats.push({ type:"👤 Client", label:`${c.nom} ${c.prenom||""} — ${c.telephone||""}${c.email?" — "+c.email:""}`, action:`afficherFicheClient(${i})`, statut:"" });
   });
+
+  // Véhicules — recherche par immat
   vehicules.forEach((v,i)=>{
-    const texte = `${v.marque} ${v.modele} ${v.immat}`.toLowerCase();
-    if(texte.includes(t)) resultats.push({ type:"🚗 Véhicule", label:`${v.marque} ${v.modele} — ${v.immat}`, action:`showPage('vehicules')` });
+    const texte = `${v.marque||""} ${v.modele||""} ${v.immat||""} ${v.proprietaire||""}`.toLowerCase();
+    if(texte.includes(t)) resultats.push({ type:"🚗 Véhicule", label:`${v.marque||""} ${v.modele||""} — ${v.immat||"—"} — ${v.proprietaire||""}`, action:`document.getElementById('rechercheHistorique').value='${v.immat||""}';showPage('vehicules');setActive(document.querySelector('[onclick*=vehicules]'));historiqueVehicule()`, statut:"" });
   });
+
+  // Documents (devis/factures)
   documents.forEach((d,i)=>{
-    const texte = `${d.id} ${d.titre} ${d.dossierNumero}`.toLowerCase();
-    if(texte.includes(t)) resultats.push({ type:"🧾 Document", label:`${d.id} — ${d.titre||""} — ${d.totalTTC.toLocaleString("fr-FR",{minimumFractionDigits:2})} €`, action:`chargerDocument(${i});showPage('devisFacture')` });
+    const texte = `${d.id||""} ${d.titre||""} ${d.dossierNumero||""} ${d.statutReglement||""}`.toLowerCase();
+    if(texte.includes(t)){
+      const stColor = d.statutReglement==="Réglé"?"#34d399":d.statutReglement==="Non réglé"?"#f87171":"#f59e0b";
+      resultats.push({ type:"🧾 "+( d.type==="facture"?"Facture":d.type==="or"?"OR":"Devis"), label:`${d.id} — ${d.titre||""} — ${(d.totalTTC||0).toLocaleString("fr-FR",{minimumFractionDigits:2})} €`, action:`chargerDocument(${i});showPage('devisFacture')`, statut:d.statutReglement, stColor });
+    }
   });
-  // Recherche dans dossiers mécanique
-  if(typeof dossiersMecanique !== "undefined"){
+
+  // Dossiers mécanique
+  if(typeof dossiersMecanique!=="undefined"){
     dossiersMecanique.forEach((d,i)=>{
-      const texte = `${d.numero} ${d.client} ${d.vehicule||""} ${d.immat||""} ${d.typePanne||""} ${d.technicien||""}`.toLowerCase();
-      if(texte.includes(t)) resultats.push({ type:"🔩 Mécanique", label:`${d.numero} — ${d.client} — ${d.vehicule||"—"} (${d.immat||"—"}) — ${d.typePanne||""}`, action:`ouvrirOrdreReparation(${i});showPage('mecanique')` });
+      const texte = `${d.numero} ${d.client} ${d.vehicule||""} ${d.immat||""} ${d.typePanne||""} ${d.technicien||""} ${d.statut||""}`.toLowerCase();
+      if(texte.includes(t)){
+        const montant = d.facture || d.devis || "";
+        resultats.push({ type:"🔩 Méca", label:`N°${d.numero} — ${d.client} — ${d.immat||"—"}${montant?" — "+Number(montant).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":""}`, action:`ouvrirDossierMecanique(${i});showPage('mecanique')`, statut:d.statut });
+      }
     });
   }
 
-  const zone = document.getElementById("resultatsRecherche");
+  // Commandes fournisseurs
+  if(typeof commandesFournisseurs!=="undefined"){
+    commandesFournisseurs.forEach((c,i)=>{
+      const texte = `${c.designation||""} ${c.fournisseur||""} ${c.reference||""} CMD-${String(c.numero).padStart(4,"0")}`.toLowerCase();
+      if(texte.includes(t)) resultats.push({ type:"📦 Commande", label:`CMD-${String(c.numero).padStart(4,"0")} — ${c.fournisseur||""} — ${c.designation||""}`, action:`showPage('devisFacture')`, statut:c.statut });
+    });
+  }
+
   if(resultats.length === 0){
-    zone.innerHTML = `<div style="padding:12px 16px;color:#64748b;font-size:13px;">Aucun résultat pour "${escHtml(terme)}"</div>`;
+    zone.innerHTML = `<div style="padding:14px 16px;color:#64748b;font-size:13px;text-align:center;">
+      <div style="font-size:20px;margin-bottom:4px;">🔍</div>
+      Aucun résultat pour "<b>${escHtml(terme)}</b>"
+    </div>`;
   } else {
-    zone.innerHTML = resultats.slice(0,8).map(r=>`
-      <div onclick="${r.action};fermerRecherche()" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid #1e293b;display:flex;gap:10px;align-items:center;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background=''">
-        <span style="font-size:11px;color:#64748b;min-width:90px;">${r.type}</span>
-        <span style="font-size:13px;">${escHtml(r.label)}</span>
-      </div>`).join("");
+    const typeOrdre = {"🪟 Vitrage":1,"🔩 Méca":2,"👤 Client":3,"🚗 Véhicule":4,"🧾 Facture":5,"🧾 Devis":6,"🧾 OR":7,"📦 Commande":8};
+    resultats.sort((a,b)=>(typeOrdre[a.type]||9)-(typeOrdre[b.type]||9));
+
+    zone.innerHTML = `
+      <div style="padding:8px 14px;font-size:11px;color:#475569;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;">
+        <span>${resultats.length} résultat${resultats.length>1?"s":""} pour "<b>${escHtml(terme)}</b>"</span>
+        <span style="cursor:pointer;color:#64748b;" onclick="fermerRecherche()">✖</span>
+      </div>
+      ${resultats.slice(0,10).map(r=>`
+        <div onclick="${r.action};fermerRecherche()"
+          style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #1e293b;display:flex;gap:10px;align-items:center;transition:background .1s;"
+          onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background=''">
+          <span style="font-size:10px;color:#64748b;min-width:72px;flex-shrink:0;">${r.type}</span>
+          <span style="font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(r.label)}</span>
+          ${r.statut?`<span style="font-size:10px;color:${r.stColor||"#94a3b8"};flex-shrink:0;">${escHtml(r.statut)}</span>`:""}
+        </div>`).join("")}
+      ${resultats.length > 10 ? `<div style="padding:8px 14px;font-size:11px;color:#475569;text-align:center;">+${resultats.length-10} autres résultats — affinez votre recherche</div>` : ""}`;
   }
   zone.style.display = "";
 }
@@ -8964,3 +9004,522 @@ function validerFractionne(index, typeDossier, totalFacture){
   toast(`✅ Paiement fractionné validé : ${modes}`);
   afficherOngletFinancier("encaissement", index, typeDossier);
 }
+
+/* =====================================================================
+   BADGES COMPTEURS DANS LE MENU
+===================================================================== */
+
+function majBadgesMenu(){
+  const set = (id, val, show) => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.textContent = val;
+    el.style.display = (show && val > 0) ? "" : "none";
+  };
+
+  // Vitrage : dossiers en cours
+  const vitrageEnCours = dossiers.filter(d=>d.statut==="En cours"||d.statut==="En attente").length;
+  set("badgeVitrage", vitrageEnCours, true);
+
+  // Mécanique : dossiers actifs
+  const mecaEnCours = (typeof dossiersMecanique!=="undefined" ? dossiersMecanique : [])
+    .filter(d=>d.statut!=="Terminé"&&d.statut!=="Facturé").length;
+  set("badgeMeca", mecaEnCours, true);
+
+  // Factures impayées
+  const impayees = documents.filter(d=>d.type==="facture"&&d.statutReglement==="Non réglé").length;
+  set("badgeImpaye", impayees, true);
+
+  // Rendez-vous aujourd'hui
+  const today = new Date().toISOString().split("T")[0];
+  const rdvAuj = rendezVous.filter(r=>r.date===today).length;
+  set("badgeRdv", rdvAuj, true);
+
+  // Badge stock rupture (déjà géré par majCompteursBadgeStock)
+}
+
+/* =====================================================================
+   INDICATEUR FIREBASE AMÉLIORÉ
+===================================================================== */
+
+let _fbLastSyncTime = null;
+
+function majIndicateurFirebase(statut){
+  const dot   = document.getElementById("fbDot");
+  const label = document.getElementById("fbLabel");
+  const last  = document.getElementById("fbLastSync");
+  if(!dot || !label) return;
+
+  const config = {
+    "connecte":     { color:"#34d399", text:"☁️ Firebase connecté",   last:true  },
+    "sync":         { color:"#38bdf8", text:"🔄 Synchronisation...",  last:false },
+    "erreur":       { color:"#f87171", text:"❌ Erreur Firebase",      last:false },
+    "offline":      { color:"#f59e0b", text:"📵 Hors-ligne",           last:false },
+    "connexion":    { color:"#64748b", text:"⏳ Connexion...",         last:false },
+  };
+  const cfg = config[statut] || config["connexion"];
+  dot.style.background = cfg.color;
+  label.textContent    = cfg.text;
+  label.style.color    = cfg.color;
+
+  if(statut === "connecte"){ _fbLastSyncTime = new Date(); }
+  if(last && _fbLastSyncTime && last){
+    const mins = Math.round((Date.now()-_fbLastSyncTime)/60000);
+    if(last){
+      last.textContent = mins < 1 ? "Sync à l'instant" : `Sync il y a ${mins} min`;
+      last.style.display = "";
+    }
+  }
+}
+
+function afficherStatutFirebase(){
+  const msg = _firebaseActif
+    ? `✅ Firebase connecté\n${_fbLastSyncTime ? "Dernière sync : "+_fbLastSyncTime.toLocaleTimeString("fr-FR") : ""}\n\nToutes vos données sont sauvegardées dans le cloud.`
+    : `❌ Firebase non connecté\n\nVos données sont sauvegardées localement dans ce navigateur.\nVérifiez votre connexion internet.`;
+  alert(msg);
+}
+
+// Brancher sur les événements Firebase existants
+const _origSauvegarderFirebase = sauvegarderFirebase;
+async function sauvegarderFirebase(){
+  majIndicateurFirebase("sync");
+  try {
+    await _origSauvegarderFirebase();
+    majIndicateurFirebase("connecte");
+  } catch(e){
+    majIndicateurFirebase("erreur");
+  }
+}
+
+/* =====================================================================
+   SYSTÈME DE NOTIFICATIONS INTERNES
+===================================================================== */
+
+function genererNotifications(){
+  const notifs = [];
+  const today  = new Date();
+  today.setHours(0,0,0,0);
+
+  // 1. Dossiers vitrage en attente depuis plus de 7 jours
+  dossiers.forEach(d=>{
+    if(d.statut==="En attente"&&d.dateCreation){
+      const jours = Math.floor((today - new Date(d.dateCreation))/86400000);
+      if(jours >= 7) notifs.push({
+        type:"warning", icon:"🪟",
+        texte:`Dossier ${d.numero} (${d.client}) en attente depuis ${jours}j`,
+        action:`ouvrirDossier(${dossiers.indexOf(d)})`
+      });
+    }
+  });
+
+  // 2. Factures impayées depuis plus de 30 jours
+  documents.filter(d=>d.type==="facture"&&d.statutReglement==="Non réglé").forEach(d=>{
+    if(d.date){
+      const jours = Math.floor((today - new Date(d.date))/86400000);
+      if(jours >= 30) notifs.push({
+        type:"danger", icon:"💰",
+        texte:`${d.id} impayée depuis ${jours}j — ${(d.totalTTC||0).toLocaleString("fr-FR",{minimumFractionDigits:2})} €`,
+        action:`chargerDocument(${documents.indexOf(d)});showPage('devisFacture')`
+      });
+    }
+  });
+
+  // 3. Stock en rupture
+  if(typeof stockPieces!=="undefined"){
+    const ruptures = stockPieces.filter(p=>p.quantite<=0);
+    if(ruptures.length) notifs.push({
+      type:"danger", icon:"📦",
+      texte:`${ruptures.length} pièce${ruptures.length>1?"s":""} en rupture de stock`,
+      action:`showPage('stockPieces')`
+    });
+    const faibles = stockPieces.filter(p=>p.quantite>0&&p.quantite<=p.seuilAlerte);
+    if(faibles.length) notifs.push({
+      type:"warning", icon:"📦",
+      texte:`${faibles.length} pièce${faibles.length>1?"s":""} en stock faible`,
+      action:`showPage('stockPieces')`
+    });
+  }
+
+  // 4. RDV aujourd'hui
+  const todayStr = new Date().toISOString().split("T")[0];
+  const rdvAuj   = rendezVous.filter(r=>r.date===todayStr);
+  if(rdvAuj.length) notifs.push({
+    type:"info", icon:"📅",
+    texte:`${rdvAuj.length} rendez-vous aujourd'hui`,
+    action:`showPage('agenda')`
+  });
+
+  // 5. Dossiers mécanique attente pièces
+  if(typeof dossiersMecanique!=="undefined"){
+    const attPieces = dossiersMecanique.filter(d=>d.statut==="Attente pièces");
+    if(attPieces.length) notifs.push({
+      type:"warning", icon:"🔩",
+      texte:`${attPieces.length} dossier${attPieces.length>1?"s":""} en attente de pièces`,
+      action:`showPage('mecanique')`
+    });
+  }
+
+  // Afficher les notifications
+  const zone      = document.getElementById("zoneNotifications");
+  const liste     = document.getElementById("listeNotifications");
+  if(!zone || !liste) return;
+
+  if(notifs.length === 0){
+    zone.style.display = "none";
+    return;
+  }
+
+  const couleurs = { danger:"#f87171", warning:"#f59e0b", info:"#38bdf8" };
+  liste.innerHTML = notifs.slice(0,5).map(n=>`
+    <div onclick="${n.action};fermerNotifications()" style="display:flex;gap:6px;align-items:flex-start;cursor:pointer;padding:4px 6px;border-radius:5px;border-left:2px solid ${couleurs[n.type]||"#64748b"};"
+      onmouseover="this.style.background='#0f172a'" onmouseout="this.style.background=''">
+      <span style="font-size:12px;flex-shrink:0;">${n.icon}</span>
+      <span style="font-size:11px;color:#94a3b8;line-height:1.4;">${escHtml(n.texte)}</span>
+    </div>`).join("");
+
+  if(notifs.length > 5){
+    liste.innerHTML += `<div style="font-size:10px;color:#475569;text-align:center;margin-top:4px;">+${notifs.length-5} autres alertes</div>`;
+  }
+  zone.style.display = "";
+}
+
+function fermerNotifications(){
+  const zone = document.getElementById("zoneNotifications");
+  if(zone) zone.style.display = "none";
+}
+
+/* =====================================================================
+   FICHE CLIENT COMPLÈTE
+===================================================================== */
+
+function afficherFicheClient(indexClient){
+  showPage('clients');
+  const c = clients[indexClient];
+  if(!c) return;
+
+  // Trouver tous les dossiers et véhicules liés
+  const dossiersClient = dossiers.filter(d=>
+    (d.client||"").toLowerCase().includes((c.nom||"").toLowerCase())
+  );
+  const mecaClient = (typeof dossiersMecanique!=="undefined" ? dossiersMecanique : []).filter(d=>
+    (d.client||"").toLowerCase().includes((c.nom||"").toLowerCase())
+  );
+  const vehiculesClient = vehicules.filter(v=>
+    (v.proprietaire||"").toLowerCase().includes((c.nom||"").toLowerCase())
+  );
+  const docsClient = documents.filter(d=>
+    dossiersClient.some(dos=>dos.numero===d.dossierNumero) ||
+    mecaClient.some(dos=>dos.numero===d.dossierNumero)
+  );
+
+  const totalCA = [...dossiersClient,...mecaClient].reduce((a,d)=>a+Number(d.facture||d.devis||0),0);
+  const totalEncaisse = [...dossiersClient,...mecaClient].reduce((a,d)=>a+Number(d.montantEncaisse||0),0);
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  const zone = document.getElementById("ficheClientDetail");
+  if(!zone) return;
+
+  zone.style.display = "";
+  zone.innerHTML = `
+    <div class="card" style="border-top:3px solid #38bdf8;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+        <div>
+          <h2 style="color:#38bdf8;margin:0 0 4px 0;">👤 ${escHtml(c.nom)} ${escHtml(c.prenom||"")}</h2>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:#94a3b8;">
+            ${c.telephone?`<span>📱 ${escHtml(c.telephone)}</span>`:""}
+            ${c.email?`<span>✉️ ${escHtml(c.email)}</span>`:""}
+            ${c.adresse?`<span>📍 ${escHtml(c.adresse)}</span>`:""}
+          </div>
+        </div>
+        <button onclick="document.getElementById('ficheClientDetail').style.display='none'" style="background:#334155;padding:6px 12px;font-size:12px;">✖ Fermer</button>
+      </div>
+
+      <!-- KPIs client -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #38bdf8;">
+          <div style="font-size:11px;color:#64748b;">Dossiers</div>
+          <div style="font-size:20px;font-weight:bold;color:#38bdf8;">${dossiersClient.length+mecaClient.length}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #a78bfa;">
+          <div style="font-size:11px;color:#64748b;">CA total</div>
+          <div style="font-size:16px;font-weight:bold;color:#a78bfa;">${fmtE(totalCA)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;">Encaissé</div>
+          <div style="font-size:16px;font-weight:bold;color:#34d399;">${fmtE(totalEncaisse)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #f87171;">
+          <div style="font-size:11px;color:#64748b;">Solde dû</div>
+          <div style="font-size:16px;font-weight:bold;color:#f87171;">${fmtE(Math.max(0,totalCA-totalEncaisse))}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:8px;padding:10px;border-top:2px solid #f59e0b;">
+          <div style="font-size:11px;color:#64748b;">Véhicules</div>
+          <div style="font-size:20px;font-weight:bold;color:#f59e0b;">${vehiculesClient.length}</div>
+        </div>
+      </div>
+
+      <!-- Véhicules -->
+      ${vehiculesClient.length > 0 ? `
+        <h3 style="color:#f59e0b;margin:0 0 8px 0;">🚗 Véhicules</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+          ${vehiculesClient.map(v=>`
+            <div style="background:#1e293b;border-radius:8px;padding:8px 14px;font-size:13px;border-left:3px solid #f59e0b;">
+              <b style="color:#f0f4f8;">${escHtml(v.marque||"")} ${escHtml(v.modele||"")}</b>
+              <span style="color:#38bdf8;margin-left:8px;">${escHtml(v.immat||"")}</span>
+              ${v.annee?`<span style="color:#64748b;margin-left:8px;">${v.annee}</span>`:""}
+            </div>`).join("")}
+        </div>` : ""}
+
+      <!-- Historique dossiers -->
+      ${dossiersClient.length+mecaClient.length > 0 ? `
+        <h3 style="color:#38bdf8;margin:0 0 8px 0;">📁 Historique des interventions</h3>
+        <div class="table-wrapper">
+          <table style="font-size:12px;">
+            <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Véhicule</th><th>Intervention</th><th>Montant</th><th>Statut</th></tr></thead>
+            <tbody>
+              ${[...dossiersClient.map(d=>({...d,_type:"🪟"})), ...mecaClient.map(d=>({...d,_type:"🔩"}))]
+                .sort((a,b)=>new Date(b.dateCreation||b.date||0)-new Date(a.dateCreation||a.date||0))
+                .map(d=>`<tr>
+                  <td><b style="color:#38bdf8;">${escHtml(d.numero||"")}</b></td>
+                  <td>${d._type}</td>
+                  <td style="white-space:nowrap;color:#64748b;">${escHtml(d.dateCreation||d.date||"—")}</td>
+                  <td>${escHtml(d.vehicule||d.marque||"")} ${escHtml(d.immat||"")}</td>
+                  <td>${escHtml(d.sinistre||d.typePanne||d.titre||"—")}</td>
+                  <td style="text-align:right;">${d.facture||d.devis?Number(d.facture||d.devis).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":"—"}</td>
+                  <td><span style="color:${d.statut==="Facturé"||d.statut==="Terminé"?"#34d399":d.statut==="En cours"?"#f59e0b":"#64748b"};">${escHtml(d.statut||"—")}</span></td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>` : `<p style="color:#64748b;font-size:13px;">Aucun dossier pour ce client.</p>`}
+
+      <!-- Actions -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        ${c.telephone?`<button onclick="window.open('sms:${escHtml(c.telephone)}')" style="background:#16a34a;font-size:12px;">📱 SMS</button>`:""}
+        ${c.telephone?`<button onclick="window.open('tel:${escHtml(c.telephone)}')" style="background:#0891b2;font-size:12px;">📞 Appeler</button>`:""}
+        ${c.email?`<button onclick="window.open('mailto:${escHtml(c.email)}')" style="background:#334155;font-size:12px;">✉️ Email</button>`:""}
+      </div>
+    </div>`;
+
+  zone.scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+/* =====================================================================
+   RACCOURCIS CLAVIER
+===================================================================== */
+
+document.addEventListener("keydown", function(e){
+  // Ne pas intercepter si on tape dans un champ
+  if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA"||e.target.tagName==="SELECT") return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+
+  switch(e.key){
+    case "Escape":
+      // Fermer modal ouverte
+      const modal = document.getElementById("modal")||document.getElementById("modalOverlay");
+      if(modal && modal.style.display!=="none"){ fermerModal(); }
+      fermerRecherche();
+      break;
+    case "f":
+    case "F":
+      e.preventDefault();
+      document.getElementById("rechercheGlobaleInput")?.focus();
+      break;
+    case "n":
+    case "N":
+      e.preventDefault();
+      showPage("dossiers"); setActive(document.querySelector('[onclick*="dossiers"]'));
+      break;
+    case "m":
+    case "M":
+      e.preventDefault();
+      showPage("mecanique"); setActive(document.querySelector('[onclick*="mecanique"]'));
+      break;
+    case "h":
+    case "H":
+      e.preventDefault();
+      showPage("dashboard"); setActive(document.querySelector('[onclick*="dashboard"]'));
+      break;
+  }
+});
+
+/* =====================================================================
+   EXPORT PDF RAPPORT MENSUEL
+===================================================================== */
+
+function exporterRapportMensuel(){
+  if(!window.jspdf){ toast("Bibliothèque PDF non chargée","error"); return; }
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF();
+  const now = new Date();
+  const moisLabel = now.toLocaleDateString("fr-FR",{month:"long",year:"numeric"});
+  const e = entreprise;
+
+  // En-tête
+  pdf.setFillColor(15,23,42); pdf.rect(0,0,210,30,"F");
+  pdf.setTextColor(255,255,255);
+  pdf.setFontSize(16); pdf.setFont(undefined,"bold");
+  pdf.text("RAPPORT MENSUEL — "+moisLabel.toUpperCase(), 105, 13, {align:"center"});
+  pdf.setFontSize(9); pdf.setFont(undefined,"normal");
+  pdf.text((e.nom||"Garage GlassMéca")+" — Généré le "+now.toLocaleDateString("fr-FR"), 105, 22, {align:"center"});
+
+  let y = 38;
+  const mois  = now.getMonth();
+  const annee = now.getFullYear();
+  const fmt   = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  const isMoisEnCours = d => {
+    const dt = new Date(d.dateCreation||d.date||0);
+    return dt.getMonth()===mois && dt.getFullYear()===annee;
+  };
+
+  const dossMois = dossiers.filter(isMoisEnCours);
+  const mecaMois = (typeof dossiersMecanique!=="undefined"?dossiersMecanique:[]).filter(isMoisEnCours);
+  const factMois = documents.filter(d=>d.type==="facture"&&isMoisEnCours(d));
+  const totalCA  = factMois.reduce((a,d)=>a+(d.totalTTC||0),0);
+  const totalHT  = factMois.reduce((a,d)=>a+(d.totalHT||0),0);
+  const totalTVA = factMois.reduce((a,d)=>a+(d.totalTVA||0),0);
+  const impayees = factMois.filter(d=>d.statutReglement==="Non réglé").reduce((a,d)=>a+(d.totalTTC||0),0);
+  const marges   = factMois.filter(d=>d.margeHT!==undefined).reduce((a,d)=>a+(d.margeHT||0),0);
+
+  // Résumé global
+  pdf.setFillColor(241,245,249); pdf.rect(14,y,182,42,"F");
+  pdf.setTextColor(0,0,0); pdf.setFontSize(10); pdf.setFont(undefined,"bold");
+  pdf.text("RÉSUMÉ DU MOIS", 16, y+8);
+  pdf.setFont(undefined,"normal"); pdf.setFontSize(9);
+  pdf.text(`Dossiers vitrage ouverts : ${dossMois.length}`,    16, y+16);
+  pdf.text(`Dossiers mécanique ouverts : ${mecaMois.length}`,  16, y+22);
+  pdf.text(`Factures émises : ${factMois.length}`,             16, y+28);
+  pdf.text(`CA HT : ${fmt(totalHT)}`,                         105, y+16);
+  pdf.text(`TVA collectée : ${fmt(totalTVA)}`,                 105, y+22);
+  pdf.text(`CA TTC : ${fmt(totalCA)}`,                         105, y+28);
+  pdf.setFont(undefined,"bold");
+  pdf.text(`Impayés : ${fmt(impayees)}`,                       16, y+36);
+  pdf.text(`Marge brute : ${fmt(marges)}`,                     105, y+36);
+  y += 50;
+
+  // Tableau factures
+  if(factMois.length > 0){
+    pdf.setFontSize(11); pdf.setFont(undefined,"bold"); pdf.text("Factures du mois", 14, y); y+=6;
+    pdf.setFillColor(15,23,42); pdf.rect(14,y,182,7,"F");
+    pdf.setTextColor(255,255,255); pdf.setFontSize(8); pdf.setFont(undefined,"bold");
+    pdf.text("N° Facture",14,y+5); pdf.text("Date",55,y+5); pdf.text("Client/Titre",75,y+5);
+    pdf.text("HT",140,y+5); pdf.text("TTC",160,y+5); pdf.text("Statut",182,y+5);
+    y+=9; pdf.setTextColor(0,0,0); pdf.setFont(undefined,"normal"); pdf.setFontSize(8);
+    factMois.forEach((d,idx)=>{
+      if(idx%2===0){pdf.setFillColor(248,250,252);pdf.rect(14,y-1,182,7,"F");}
+      const stc=d.statutReglement==="Réglé"?[0,128,0]:d.statutReglement==="Partiel"?[180,100,0]:[200,0,0];
+      pdf.text(d.id||"",14,y+4); pdf.text(d.date||"",55,y+4);
+      pdf.text((d.titre||"").substring(0,30),75,y+4);
+      pdf.text(fmt(d.totalHT||0),138,y+4,{align:"right"}); pdf.text(fmt(d.totalTTC||0),158,y+4,{align:"right"});
+      pdf.setTextColor(...stc); pdf.text(d.statutReglement||"—",182,y+4); pdf.setTextColor(0,0,0);
+      y+=7; if(y>265){pdf.addPage();y=20;}
+    });
+  }
+
+  // Mentions
+  const ph=pdf.internal.pageSize.height;
+  pdf.setFontSize(7); pdf.setTextColor(130,130,130); let my=ph-12;
+  if(e.siret){pdf.text("SIRET : "+e.siret+(e.tva?" — TVA : "+e.tva:""),14,my);}
+
+  pdf.save(`Rapport-${moisLabel.replace(" ","-")}-${e.nom||"GlassMeca"}.pdf`);
+  toast("Rapport mensuel PDF généré ✓");
+}
+
+/* =====================================================================
+   SAUVEGARDE AUTOMATIQUE JSON
+===================================================================== */
+
+function exporterSauvegardeJSON(){
+  const data = {
+    date: new Date().toISOString(),
+    version: "DA-Gestion v2",
+    garage: entreprise.nom || "GlassMéca",
+    clients, vehicules, dossiers, rendezVous, assurances, documents,
+    dossiersMecanique: typeof dossiersMecanique!=="undefined"?dossiersMecanique:[],
+    stockPieces:       typeof stockPieces!=="undefined"?stockPieces:[],
+    catalogueTarifs:   typeof catalogueTarifs!=="undefined"?catalogueTarifs:[],
+    commandesFournisseurs: typeof commandesFournisseurs!=="undefined"?commandesFournisseurs:[],
+    tachesPlanning:    typeof tachesPlanning!=="undefined"?tachesPlanning:[],
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `Sauvegarde-GlassMeca-${new Date().toISOString().split("T")[0]}.json`;
+  a.click();
+  toast("Sauvegarde JSON téléchargée ✓");
+}
+
+/* =====================================================================
+   MODE IMPRESSION
+===================================================================== */
+
+function imprimerPage(){
+  // Injecter CSS d'impression temporaire
+  const style = document.createElement("style");
+  style.id = "printStyle";
+  style.textContent = `
+    @media print {
+      .sidebar, header, #titrePage, button, .delete-btn, .btn-success,
+      [onclick], nav, .sidebar-footer { display: none !important; }
+      .content { margin: 0 !important; padding: 0 !important; }
+      .page { display: block !important; }
+      .hidden { display: none !important; }
+      body { background: white !important; color: black !important; }
+      .card { border: 1px solid #ccc !important; background: white !important; break-inside: avoid; }
+      table { font-size: 11px !important; }
+      th { background: #f0f0f0 !important; color: black !important; }
+    }`;
+  document.head.appendChild(style);
+  window.print();
+  setTimeout(()=>{ document.getElementById("printStyle")?.remove(); }, 1000);
+}
+
+/* =====================================================================
+   INTÉGRATION — Brancher tout au chargement et dans majCompteurs
+===================================================================== */
+
+// Surcharger majCompteurs pour inclure les badges et notifications
+const _origMajCompteurs = typeof majCompteurs !== "undefined" ? majCompteurs : ()=>{};
+function majCompteurs(){
+  if(typeof _origMajCompteurs === "function") _origMajCompteurs();
+  majBadgesMenu();
+  genererNotifications();
+  majIndicateurFirebase(_firebaseActif ? "connecte" : "offline");
+}
+
+// Ajouter raccourcis et rapport dans la sidebar au démarrage
+document.addEventListener("DOMContentLoaded",()=>{
+  // Ajouter boutons dans paramètres sidebar
+  const nav = document.querySelector(".sidebar nav");
+  if(nav){
+    const aRapport = document.createElement("a");
+    aRapport.href = "#";
+    aRapport.onclick = ()=>{ exporterRapportMensuel(); return false; };
+    aRapport.textContent = "📄 Rapport mensuel";
+    aRapport.style.cssText = "font-size:12px;color:#94a3b8;";
+    nav.appendChild(aRapport);
+
+    const aSvg = document.createElement("a");
+    aSvg.href = "#";
+    aSvg.onclick = ()=>{ exporterSauvegardeJSON(); return false; };
+    aSvg.textContent = "💾 Sauvegarder (.json)";
+    aSvg.style.cssText = "font-size:12px;color:#94a3b8;";
+    nav.appendChild(aSvg);
+
+    const aImpr = document.createElement("a");
+    aImpr.href = "#";
+    aImpr.onclick = ()=>{ imprimerPage(); return false; };
+    aImpr.textContent = "🖨 Imprimer la page";
+    aImpr.style.cssText = "font-size:12px;color:#94a3b8;";
+    nav.appendChild(aImpr);
+  }
+
+  // Afficher les raccourcis dans un tooltip discret
+  const hint = document.createElement("div");
+  hint.style.cssText = "position:fixed;bottom:12px;right:12px;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:8px 12px;font-size:11px;color:#475569;z-index:100;opacity:0;transition:opacity .3s;pointer-events:none;";
+  hint.innerHTML = "⌨️ <b>F</b> Recherche &nbsp;·&nbsp; <b>N</b> Nouveau dossier &nbsp;·&nbsp; <b>M</b> Méca &nbsp;·&nbsp; <b>H</b> Accueil &nbsp;·&nbsp; <b>Échap</b> Fermer";
+  document.body.appendChild(hint);
+  setTimeout(()=>{ hint.style.opacity="1"; }, 2000);
+  setTimeout(()=>{ hint.style.opacity="0"; }, 7000);
+  setTimeout(()=>{ hint.remove(); }, 7500);
+});
