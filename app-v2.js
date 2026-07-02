@@ -105,7 +105,7 @@ function afficherEcranLogin(){
           <text x="160" y="214" text-anchor="middle" font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="13" fill="#f0f4f8" letter-spacing="3">Glass<tspan fill="#c9a86c">Méca</tspan></text>
         </svg>
         <p style="color:#c9a86c;font-size:12px;font-weight:bold;letter-spacing:1px;margin:4px 0 2px;">GARAGE GLASSMECA</p>
-        <p style="color:#64748b;font-size:12px;margin:0;">Connectez-vous pour accéder à l'application</p>
+        <p style="color:#64748b;font-size:12px;margin:0;">Connectez-vous pour accéder à votre espace</p>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px;">
         <div>
@@ -120,6 +120,12 @@ function afficherEcranLogin(){
         </div>
         <div id="loginErreur" style="color:#f87171;font-size:13px;text-align:center;min-height:18px;"></div>
         <button onclick="tentativeConnexion()" style="width:100%;padding:12px;font-size:15px;margin-top:4px;">🔐 Se connecter</button>
+        <div style="text-align:center;margin-top:16px;padding-top:16px;border-top:1px solid #1e293b;">
+          <p style="font-size:12px;color:#64748b;margin-bottom:10px;">Pas encore de compte ?</p>
+          <a href="inscription.html" style="display:block;width:100%;padding:11px;background:linear-gradient(135deg,#c9a86c,#f0c674);color:#000;border-radius:8px;font-size:14px;font-weight:700;text-decoration:none;text-align:center;box-sizing:border-box;">
+            ✨ Créer un compte gratuitement
+          </a>
+        </div>
       </div>
     </div>`;
   setTimeout(() => document.getElementById("loginInput")?.focus(), 100);
@@ -356,7 +362,8 @@ async function initFirebase(){
 async function chargerDepuisFirebase(){
   if(!db) return;
   try {
-    const snap = await db.ref("/").get();
+    const garageId = _getGarageId();
+    const snap = await db.ref("/garages/" + garageId).get();
     if(!snap.exists()) return;
     const d = snap.val();
 
@@ -383,7 +390,8 @@ async function chargerDepuisFirebase(){
 function ecouterChangementsFirebase(){
   if(!db) return;
   let premierAppel = true;
-  db.ref("/").on("value", snap => {
+  const _garageIdListen = _getGarageId();
+  db.ref("/garages/" + _garageIdListen).on("value", snap => {
     if(premierAppel){ premierAppel = false; return; } // ignorer le premier appel (déjà chargé)
     if(_syncEnCours) return;
     if(!snap.exists()) return;
@@ -417,6 +425,7 @@ async function sauvegarderFirebase(){
   if(!db || !_firebaseActif) return;
   _syncEnCours = true;
   try {
+    const garageId = _getGarageId();
     const payload = {
       clients:                clients,
       vehicules:              vehicules,
@@ -427,13 +436,13 @@ async function sauvegarderFirebase(){
       entreprise:             entreprise,
       dossiersMecanique:      typeof dossiersMecanique !== "undefined" ? dossiersMecanique : [],
       utilisateurs:           getUtilisateurs(),
-      // Nouveaux modules
       stockPieces:            typeof stockPieces !== "undefined" ? stockPieces : [],
       catalogueTarifs:        typeof catalogueTarifs !== "undefined" ? catalogueTarifs : [],
       commandesFournisseurs:  typeof commandesFournisseurs !== "undefined" ? commandesFournisseurs : [],
       tachesPlanning:         typeof tachesPlanning !== "undefined" ? tachesPlanning : [],
+      _meta: { lastSave: new Date().toISOString(), version: "2.0" }
     };
-    await db.ref("/").set(payload);
+    await db.ref("/garages/" + garageId).set(payload);
   } catch(e){
     console.warn("⚠️ Erreur sauvegarde Firebase :", e.message);
     toast("⚠️ Sauvegarde locale uniquement", "error");
@@ -620,10 +629,23 @@ function normaliserNumerosDossiers(){
 
 function getProchainNumeroDossier(){
   normaliserNumerosDossiers();
-  let prochain = parseInt(localStorage.getItem("prochainNumeroDossier") || "1", 10);
-  if(isNaN(prochain) || prochain < 1) prochain = 1;
-  localStorage.setItem("prochainNumeroDossier", String(prochain + 1));
-  return String(prochain);
+  const annee = new Date().getFullYear();
+  const cle   = "prochainNumero_" + annee;
+  let seq = parseInt(localStorage.getItem(cle) || "1", 10);
+  if(isNaN(seq) || seq < 1) seq = 1;
+  localStorage.setItem(cle, String(seq + 1));
+  // Format : VIT-2026-001
+  return "VIT-" + annee + "-" + String(seq).padStart(3, "0");
+}
+
+function getProchainNumeroDocument(type){
+  // type = "DEV" | "FAC" | "OR"
+  const annee = new Date().getFullYear();
+  const cle   = "prochainNumero_" + type + "_" + annee;
+  let seq = parseInt(localStorage.getItem(cle) || "1", 10);
+  if(isNaN(seq) || seq < 1) seq = 1;
+  localStorage.setItem(cle, String(seq + 1));
+  return type + "-" + annee + "-" + String(seq).padStart(3, "0");
 }
 
 /* =====================================
@@ -680,13 +702,16 @@ function toast(message, type="success"){
 function rechercheGlobale(terme){
   const zone = document.getElementById("resultatsRecherche");
   if(!terme || terme.length < 2){ zone.style.display="none"; return; }
-  const t = terme.toLowerCase();
+  // Normaliser la recherche : supprimer tirets/espaces pour les immatriculations
+  const t     = terme.toLowerCase().replace(/[\s-]/g,"");
+  const tOrig = terme.toLowerCase();
   const resultats = [];
 
   // Dossiers vitrage
   dossiers.forEach((d,i)=>{
+    const immatNorm = (d.immat||"").toLowerCase().replace(/[\s-]/g,"");
     const texte = `${d.numero} ${d.client} ${d.vehicule} ${d.immat||""} ${d.sinistre||""} ${d.assurance||""} ${d.telephone||""} ${d.statut||""}`.toLowerCase();
-    if(texte.includes(t)){
+    if(texte.includes(tOrig) || immatNorm.includes(t)){
       const montant = d.facture || d.devis || "";
       resultats.push({ type:"🪟 Vitrage", label:`N°${d.numero} — ${d.client} — ${d.immat||"—"}${montant?" — "+Number(montant).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €":""}`, action:`ouvrirDossier(${i})`, statut:d.statut });
     }
@@ -793,6 +818,7 @@ function showPage(pageId){
   if(pageId === "devisFacture")      { setTimeout(()=>{ majNumeroDocument(); renderCatalogue(); renderCommandes(); majCompteursCmds(); renderCalc(); }, 100); }
   if(pageId === "relancesAssurance") { setTimeout(()=>{ initRelancesAssurance(); }, 0); }
   if(pageId === "stockPieces")       { setTimeout(()=>{ renderStock(); }, 0); }
+  if(pageId === "dossiers")          { setTimeout(()=>{ renderDashboardVitrage(); }, 0); }
 
   // Masquer toutes les pages
   document.querySelectorAll(".page").forEach(p => p.classList.add("hidden"));
@@ -1644,6 +1670,7 @@ function rechercherDossier(){
 ===================================== */
 
 function renderDossiers(){
+  renderDashboardVitrage();
   const table = document.getElementById("listeDossiers");
   if(!table) return;
 
@@ -1709,6 +1736,7 @@ function renderDossiersRecent(){
 ===================================== */
 
 function ouvrirDossier(index){
+  _dossierIndex = index;
   const d = dossiers[index];
   const zone = document.getElementById("detailDossier");
   if(!zone) return;
@@ -1782,7 +1810,9 @@ function ouvrirDossier(index){
       </div>` : ""}
       <br>
       <button onclick="ouvrirFinancierDossier(${index})" style="background:#16a34a;font-size:14px;padding:10px 18px;">💰 Devis / Facture / Encaissement</button>
-      <button onclick="imprimerDossier()">🖨 Imprimer</button>
+      <button onclick="imprimerDossier()" style="background:#0891b2;">🖨 Fiche dossier</button>
+      <button onclick="afficherNoteDossier(${index})" style="background:#334155;">📝 Notes</button>
+      <button onclick="ajouterPhotoDossier(${index})" style="background:#334155;">📷 Photos</button>
       <button onclick="genererDeclaration(${index})">📋 Déclaration</button>
       <button onclick="emailAssurance(${index})">📧 Email assurance</button>
       <button onclick="afficherTransfertDossier(${index})" style="background:#7c3aed;">🔀 Transférer</button>
@@ -1881,14 +1911,126 @@ function executerTransfert(indexSource){
 ===================================== */
 
 function imprimerDossier(){
-  const contenu = document.getElementById("detailDossier").innerHTML;
-  const fenetre = window.open("", "", "width=1000,height=800");
-  fenetre.document.write(`<html><head><title>Impression dossier</title>
-    <style>body{font-family:Arial;padding:30px;}img{max-width:500px;}.badge{padding:3px 8px;border-radius:10px;font-weight:bold;}</style>
-    </head><body>${contenu}</body></html>`);
+  const d = dossiers[_dossierIndex];
+  if(!d) return;
+  const e = entreprise;
+  const today = new Date().toLocaleDateString("fr-FR");
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+  const stColor = d.statut==="Facturé"?"#16a34a":d.statut==="En cours"?"#d97706":"#64748b";
+
+  const fenetre = window.open("","","width=850,height=1100");
+  fenetre.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
+  <title>Dossier ${d.numero} — ${d.client}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;font-size:13px;color:#111;background:#fff;padding:24px;}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111;padding-bottom:14px;margin-bottom:18px;}
+    .garage-name{font-size:20px;font-weight:900;color:#111;}
+    .garage-info{font-size:11px;color:#555;line-height:1.7;margin-top:4px;}
+    .doc-title{text-align:right;}
+    .doc-title h1{font-size:26px;font-weight:900;color:#111;}
+    .doc-title p{font-size:12px;color:#555;margin-top:4px;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;}
+    .box{border:1px solid #e5e7eb;border-radius:6px;padding:14px;}
+    .box h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#555;margin-bottom:10px;border-bottom:1px solid #e5e7eb;padding-bottom:6px;}
+    .field{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;}
+    .field .label{color:#555;}
+    .field .val{font-weight:600;color:#111;text-align:right;max-width:55%;}
+    .badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff;background:${stColor};}
+    .montants{background:#f8fafc;border-radius:6px;padding:14px;margin-bottom:18px;border:1px solid #e5e7eb;}
+    .montants h3{font-size:11px;font-weight:700;text-transform:uppercase;color:#555;margin-bottom:10px;}
+    .montant-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+    .montant-item{text-align:center;}
+    .montant-item .val{font-size:18px;font-weight:900;color:#111;}
+    .montant-item .lbl{font-size:10px;color:#888;margin-top:2px;}
+    .signature{margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:30px;}
+    .sig-box{border-top:2px solid #111;padding-top:8px;}
+    .sig-box p{font-size:11px;color:#555;}
+    .footer{margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;color:#999;text-align:center;line-height:1.7;}
+    @media print{body{padding:16px;}button{display:none!important;}}
+  </style></head><body>
+
+  <div class="header">
+    <div>
+      <div class="garage-name">${e.nom||"Garage GlassMéca"}</div>
+      <div class="garage-info">
+        ${e.adresse?e.adresse+"<br>":""}
+        ${e.telephone?"Tél : "+e.telephone+" | ":""}${e.email?e.email:""}
+        ${e.siret?"<br>SIRET : "+e.siret:""}
+      </div>
+    </div>
+    <div class="doc-title">
+      <h1>FICHE DOSSIER</h1>
+      <p>N° ${d.numero} · ${today}</p>
+      <p style="margin-top:6px;"><span class="badge">${d.statut||"En cours"}</span></p>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="box">
+      <h3>Client</h3>
+      <div class="field"><span class="label">Nom</span><span class="val">${d.client||"—"}</span></div>
+      <div class="field"><span class="label">Téléphone</span><span class="val">${d.telephone||"—"}</span></div>
+      <div class="field"><span class="label">Email</span><span class="val">${d.email||"—"}</span></div>
+      <div class="field"><span class="label">Adresse</span><span class="val">${d.adresse||"—"}</span></div>
+    </div>
+    <div class="box">
+      <h3>Véhicule</h3>
+      <div class="field"><span class="label">Marque / Modèle</span><span class="val">${d.vehicule||d.marque||"—"}${d.modele?" "+d.modele:""}</span></div>
+      <div class="field"><span class="label">Immatriculation</span><span class="val">${d.immat||"—"}</span></div>
+      <div class="field"><span class="label">VIN</span><span class="val">${d.vin||"—"}</span></div>
+      <div class="field"><span class="label">Couleur</span><span class="val">${d.couleur||"—"}</span></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="box">
+      <h3>Intervention</h3>
+      <div class="field"><span class="label">Type vitrage</span><span class="val">${d.vitrage||"—"}</span></div>
+      <div class="field"><span class="label">Technicien</span><span class="val">${d.technicien||"—"}</span></div>
+      <div class="field"><span class="label">Date création</span><span class="val">${d.dateCreation||d.date||"—"}</span></div>
+      <div class="field"><span class="label">Date RDV</span><span class="val">${d.dateRdv||"—"}</span></div>
+    </div>
+    <div class="box">
+      <h3>Assurance</h3>
+      <div class="field"><span class="label">Compagnie</span><span class="val">${d.assurance||"—"}</span></div>
+      <div class="field"><span class="label">N° sinistre</span><span class="val">${d.sinistre||"—"}</span></div>
+      <div class="field"><span class="label">N° contrat</span><span class="val">${d.contrat||"—"}</span></div>
+      <div class="field"><span class="label">Franchise</span><span class="val">${d.franchise||"—"}</span></div>
+    </div>
+  </div>
+
+  <div class="montants">
+    <h3>Financier</h3>
+    <div class="montant-grid">
+      <div class="montant-item"><div class="val">${fmtE(d.devis)}</div><div class="lbl">Devis</div></div>
+      <div class="montant-item"><div class="val">${fmtE(d.facture)}</div><div class="lbl">Facture</div></div>
+      <div class="montant-item"><div class="val">${fmtE(d.montantEncaisse)}</div><div class="lbl">Encaissé</div></div>
+      <div class="montant-item"><div class="val" style="color:${Math.max(0,Number(d.facture||0)-Number(d.montantEncaisse||0))>0?"#dc2626":"#16a34a"};">${fmtE(Math.max(0,Number(d.facture||0)-Number(d.montantEncaisse||0)))}</div><div class="lbl">Solde dû</div></div>
+    </div>
+  </div>
+
+  ${d.notes?`<div class="box" style="margin-bottom:18px;"><h3>Notes internes</h3><p style="font-size:12px;color:#444;line-height:1.6;">${d.notes}</p></div>`:""}
+
+  <div class="signature">
+    <div class="sig-box"><p>Signature du client</p><div style="height:60px;"></div><p style="font-size:12px;">Lu et approuvé · ${today}</p></div>
+    <div class="sig-box"><p>Signature du technicien</p><div style="height:60px;"></div><p style="font-size:12px;">${d.technicien||""}</p></div>
+  </div>
+
+  <div class="footer">
+    ${e.nom||"Garage GlassMéca"} · ${e.adresse||""} · ${e.telephone||""}<br>
+    ${e.siret?"SIRET : "+e.siret+" · ":""}${e.tva?"TVA : "+e.tva+" · ":""}${e.cgu||""}
+  </div>
+
+  <div style="text-align:center;margin-top:16px;">
+    <button onclick="window.print();window.close();" style="background:#111;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;">🖨 Imprimer</button>
+  </div>
+  </body></html>`);
   fenetre.document.close();
-  fenetre.print();
 }
+
+// Variable globale pour connaître le dossier courant
+let _dossierIndex = 0;
 
 /* =====================================
    PDF DEVIS
@@ -3716,6 +3858,7 @@ function ouvrirDossierMecanique(index){
       <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
         <button onclick="ouvrirFinancierMecanique(${index})" style="background:#16a34a;font-size:14px;padding:10px 18px;">💰 Devis / Facture / Encaissement</button>
         <button onclick="modifierDossierMecanique(${index})">✏ Modifier</button>
+        <button onclick="afficherNoteDossierMecanique(${index})" style="background:#334155;">📝 Notes</button>
         <button onclick="ajouterReparationOrdre(${index})" class="btn-success">➕ Réparation</button>
         <button onclick="imprimerOrdreMission(${index})" style="background:#7c3aed;">🖨 Ordre réparation</button>
         <button onclick="envoyerSmsVehiculeTermine(${index})" style="background:#0891b2;">📱 SMS</button>
@@ -9522,4 +9665,542 @@ document.addEventListener("DOMContentLoaded",()=>{
   setTimeout(()=>{ hint.style.opacity="1"; }, 2000);
   setTimeout(()=>{ hint.style.opacity="0"; }, 7000);
   setTimeout(()=>{ hint.remove(); }, 7500);
+});
+
+/* =====================================================================
+   SYSTÈME MULTI-TENANTS — GESTION DES GARAGES
+   Chaque garage a son propre espace isolé dans Firebase
+   Structure: /garages/{garageId}/...
+===================================================================== */
+
+/* ── Obtenir l'ID unique du garage ── */
+function _getGarageId(){
+  // Priorité : URL param > localStorage > générer nouveau
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlGarageId = urlParams.get("garage");
+  if(urlGarageId && /^[a-zA-Z0-9_-]{4,32}$/.test(urlGarageId)){
+    localStorage.setItem("garageId", urlGarageId);
+    return urlGarageId;
+  }
+  let stored = localStorage.getItem("garageId");
+  if(stored && /^[a-zA-Z0-9_-]{4,32}$/.test(stored)){
+    return stored;
+  }
+  // Générer un ID unique basé sur le nom garage + timestamp
+  const nomGarage = (entreprise?.nom || "garage").toLowerCase()
+    .replace(/[^a-z0-9]/g, "").substring(0, 12);
+  const newId = nomGarage + "_" + Date.now().toString(36);
+  localStorage.setItem("garageId", newId);
+  return newId;
+}
+
+/* ── Interface de gestion du compte garage ── */
+function ouvrirGestionCompte(){
+  const garageId = _getGarageId();
+  const lienPartage = `${window.location.origin}${window.location.pathname}?garage=${garageId}`;
+
+  ouvrirModal("⚙️ Mon compte — Garage GlassMéca",
+    `<div style="display:flex;flex-direction:column;gap:16px;">
+
+      <!-- Identifiant du garage -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;border:1px solid #1e293b;">
+        <h3 style="color:#38bdf8;margin:0 0 10px 0;">🆔 Identifiant de votre garage</h3>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="garageIdDisplay" value="${escHtml(garageId)}"
+            style="flex:1;font-family:monospace;font-size:13px;background:#1e293b;border-color:#334155;"
+            readonly>
+          <button onclick="copierGarageId()" style="background:#0891b2;white-space:nowrap;">📋 Copier</button>
+        </div>
+        <p style="font-size:12px;color:#64748b;margin:8px 0 0 0;">
+          Cet identifiant unique permet d'accéder à VOS données. Ne le partagez qu'à vos collaborateurs de confiance.
+        </p>
+      </div>
+
+      <!-- Lien d'accès -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;border:1px solid #1e293b;">
+        <h3 style="color:#34d399;margin:0 0 10px 0;">🔗 Lien d'accès direct</h3>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="lienPartage" value="${escHtml(lienPartage)}"
+            style="flex:1;font-family:monospace;font-size:11px;background:#1e293b;border-color:#334155;"
+            readonly>
+          <button onclick="copierLienPartage()" style="background:#16a34a;white-space:nowrap;">📋 Copier</button>
+        </div>
+        <p style="font-size:12px;color:#64748b;margin:8px 0 0 0;">
+          Partagez ce lien avec vos employés pour qu'ils accèdent à l'application avec vos données.
+        </p>
+      </div>
+
+      <!-- Changer de garage -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;border:1px solid #334155;">
+        <h3 style="color:#f59e0b;margin:0 0 10px 0;">🔄 Changer de garage</h3>
+        <p style="font-size:12px;color:#64748b;margin:0 0 8px 0;">
+          Entrez l'identifiant d'un autre garage pour accéder à ses données :
+        </p>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="nouveauGarageId" placeholder="Ex: mongarage_abc123"
+            style="flex:1;font-family:monospace;font-size:13px;">
+          <button onclick="changerDeGarage()" style="background:#f59e0b;color:#000;white-space:nowrap;">➡️ Accéder</button>
+        </div>
+      </div>
+
+      <!-- Statistiques du compte -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;border:1px solid #1e293b;">
+        <h3 style="color:#a78bfa;margin:0 0 10px 0;">📊 Vos données</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;font-size:13px;">
+          <div style="text-align:center;">
+            <div style="font-size:24px;font-weight:bold;color:#38bdf8;">${dossiers.length}</div>
+            <div style="color:#64748b;">Dossiers vitrage</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:24px;font-weight:bold;color:#7c3aed;">${typeof dossiersMecanique!=="undefined"?dossiersMecanique.length:0}</div>
+            <div style="color:#64748b;">Dossiers méca</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:24px;font-weight:bold;color:#34d399;">${clients.length}</div>
+            <div style="color:#64748b;">Clients</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:24px;font-weight:bold;color:#f59e0b;">${documents.length}</div>
+            <div style="color:#64748b;">Documents</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Zone danger -->
+      <div style="background:#1a0505;border-radius:10px;padding:14px;border:1px solid #7f1d1d;">
+        <h3 style="color:#f87171;margin:0 0 8px 0;">⚠️ Zone dangereuse</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="exporterSauvegardeJSON()" style="background:#334155;font-size:12px;">💾 Télécharger sauvegarde complète</button>
+          <button onclick="reinitialiserCompte()" style="background:#7f1d1d;font-size:12px;">🗑 Réinitialiser toutes les données</button>
+        </div>
+      </div>
+
+    </div>`,
+    null
+  );
+  setTimeout(()=>{ const btn=document.getElementById("modalBtnOk"); if(btn) btn.style.display="none"; },50);
+}
+
+function copierGarageId(){
+  const val = document.getElementById("garageIdDisplay")?.value;
+  if(val) navigator.clipboard.writeText(val).then(()=>toast("ID copié ✓")).catch(()=>toast("Copie impossible","error"));
+}
+
+function copierLienPartage(){
+  const val = document.getElementById("lienPartage")?.value;
+  if(val) navigator.clipboard.writeText(val).then(()=>toast("Lien copié ✓")).catch(()=>toast("Copie impossible","error"));
+}
+
+function changerDeGarage(){
+  const newId = document.getElementById("nouveauGarageId")?.value.trim();
+  if(!newId || !/^[a-zA-Z0-9_-]{4,32}$/.test(newId)){
+    toast("Identifiant invalide (4-32 caractères alphanumériques)","error");
+    return;
+  }
+  if(!window.confirm(`Basculer vers le garage "${newId}" ?\n\nVos données actuelles ne sont pas perdues, elles restent dans votre espace Firebase.`)) return;
+  localStorage.setItem("garageId", newId);
+  toast("Changement de garage — Rechargement...");
+  setTimeout(()=>{ window.location.reload(); }, 1500);
+}
+
+function reinitialiserCompte(){
+  if(!window.confirm("⚠️ ATTENTION !\n\nToutes vos données seront définitivement supprimées de Firebase.\n\nCette action est IRRÉVERSIBLE.\n\nÊtes-vous absolument certain ?")) return;
+  if(!window.confirm("Dernière confirmation : supprimer TOUTES les données du garage ?")) return;
+
+  const garageId = _getGarageId();
+  if(db && _firebaseActif){
+    db.ref("/garages/" + garageId).remove()
+      .then(()=>{
+        localStorage.clear();
+        toast("Données supprimées — Rechargement...");
+        setTimeout(()=>{ window.location.reload(); }, 2000);
+      })
+      .catch(e=>toast("Erreur suppression Firebase : "+e.message,"error"));
+  } else {
+    localStorage.clear();
+    toast("Données locales supprimées — Rechargement...");
+    setTimeout(()=>{ window.location.reload(); }, 1500);
+  }
+}
+
+/* ── Afficher l'ID du garage dans l'interface ── */
+function afficherInfoGarage(){
+  const garageId = _getGarageId();
+  const el = document.getElementById("garageIdBadge");
+  if(el){
+    el.textContent = "🏪 " + garageId;
+    el.title = "Cliquez pour gérer votre compte";
+    el.onclick = ()=>{ ouvrirGestionCompte(); return false; };
+  }
+}
+
+// Appeler au démarrage
+document.addEventListener("DOMContentLoaded", ()=>{
+  setTimeout(afficherInfoGarage, 500);
+});
+
+/* =====================================================================
+   POINT 4 : DASHBOARD VITRAGE (KPIs dédiés)
+===================================================================== */
+
+function renderDashboardVitrage(){
+  const el = document.getElementById("dashboardVitrage");
+  if(!el) return;
+
+  const now = new Date();
+  const moisCourant = now.getMonth();
+  const anneeCourante = now.getFullYear();
+
+  const isMoisCourant = d => {
+    const dt = new Date(d.dateCreation||d.date||"");
+    return dt.getMonth()===moisCourant && dt.getFullYear()===anneeCourante;
+  };
+
+  const dos = Array.isArray(dossiers) ? dossiers : [];
+  const dosMois  = dos.filter(isMoisCourant);
+  const enCours  = dos.filter(d=>d.statut==="En cours"||d.statut==="En attente");
+  const termines = dos.filter(d=>d.statut==="Terminé"||d.statut==="Facturé");
+  const factures = dos.filter(d=>d.statut==="Facturé");
+  const impayees = dos.filter(d=>{
+    const enc = parseFloat(d.montantEncaisse||0);
+    const fac = parseFloat(d.facture||0);
+    return fac > 0 && enc < fac;
+  });
+
+  const caMois    = dosMois.reduce((a,d)=>a+Number(d.facture||0),0);
+  const caTotal   = dos.reduce((a,d)=>a+Number(d.facture||0),0);
+  const tauxTrans = dosMois.length > 0 ? Math.round(dosMois.filter(d=>d.facture>0).length / dosMois.length * 100) : 0;
+  const soldeImpaye = impayees.reduce((a,d)=>a+Math.max(0,Number(d.facture||0)-Number(d.montantEncaisse||0)),0);
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  el.innerHTML = `
+    <div style="margin-bottom:20px;">
+      <h2 style="color:#38bdf8;margin:0 0 16px 0;">🪟 Tableau de bord Vitrage</h2>
+
+      <!-- KPIs principaux -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;">
+        <div style="background:#0f172a;border-radius:10px;padding:14px;border-top:3px solid #38bdf8;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">CA ce mois</div>
+          <div style="font-size:22px;font-weight:900;color:#38bdf8;">${fmtE(caMois)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:10px;padding:14px;border-top:3px solid #34d399;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">CA total</div>
+          <div style="font-size:22px;font-weight:900;color:#34d399;">${fmtE(caTotal)}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:10px;padding:14px;border-top:3px solid #f59e0b;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Dossiers en cours</div>
+          <div style="font-size:22px;font-weight:900;color:#f59e0b;">${enCours.length}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:10px;padding:14px;border-top:3px solid #a78bfa;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Taux transformation</div>
+          <div style="font-size:22px;font-weight:900;color:#a78bfa;">${tauxTrans}%</div>
+          <div style="font-size:10px;color:#475569;">devis → facture ce mois</div>
+        </div>
+        <div style="background:#0f172a;border-radius:10px;padding:14px;border-top:3px solid #f87171;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Impayés</div>
+          <div style="font-size:22px;font-weight:900;color:#f87171;">${fmtE(soldeImpaye)}</div>
+          <div style="font-size:10px;color:#475569;">${impayees.length} dossier${impayees.length>1?"s":""}</div>
+        </div>
+        <div style="background:#0f172a;border-radius:10px;padding:14px;border-top:3px solid #0891b2;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Dossiers ce mois</div>
+          <div style="font-size:22px;font-weight:900;color:#0891b2;">${dosMois.length}</div>
+        </div>
+      </div>
+
+      <!-- Répartition statuts -->
+      <div style="background:#0f172a;border-radius:10px;padding:14px;margin-bottom:18px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:10px;font-weight:600;">RÉPARTITION DES DOSSIERS</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          ${[
+            {lbl:"En attente", val:dos.filter(d=>d.statut==="En attente").length, color:"#64748b"},
+            {lbl:"En cours",   val:dos.filter(d=>d.statut==="En cours").length,   color:"#f59e0b"},
+            {lbl:"Terminé",    val:termines.length-factures.length,               color:"#34d399"},
+            {lbl:"Facturé",    val:factures.length,                               color:"#38bdf8"},
+          ].map(s=>`
+            <div style="flex:1;min-width:100px;background:#1e293b;border-radius:8px;padding:10px;text-align:center;">
+              <div style="font-size:24px;font-weight:900;color:${s.color};">${s.val}</div>
+              <div style="font-size:11px;color:#64748b;">${s.lbl}</div>
+            </div>`).join("")}
+        </div>
+      </div>
+
+      <!-- Dossiers impayés -->
+      ${impayees.length > 0 ? `
+      <div style="background:#1a0505;border-radius:10px;padding:14px;border:1px solid #7f1d1d;">
+        <div style="font-size:12px;color:#f87171;margin-bottom:10px;font-weight:700;">⚠️ FACTURES IMPAYÉES — ${fmtE(soldeImpaye)}</div>
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;">
+          ${impayees.slice(0,10).map((d,i)=>{
+            const solde = Math.max(0,Number(d.facture||0)-Number(d.montantEncaisse||0));
+            return `<div style="display:flex;justify-content:space-between;align-items:center;background:#0f172a;border-radius:6px;padding:8px 12px;font-size:12px;">
+              <span style="color:#94a3b8;">N°${d.numero} — ${d.client} — ${d.immat||""}</span>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span style="color:#f87171;font-weight:700;">${fmtE(solde)}</span>
+                ${d.telephone?`<button onclick="window.open('sms:${d.telephone}')" style="background:#16a34a;padding:2px 8px;font-size:11px;">📱 SMS</button>`:""}
+                <button onclick="ouvrirFinancierDossier(${dossiers.indexOf(d)})" style="background:#0891b2;padding:2px 8px;font-size:11px;">💰 Régler</button>
+              </div>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>` : `<div style="background:#14532d;border-radius:8px;padding:12px;text-align:center;font-size:13px;color:#86efac;">✅ Aucune facture impayée</div>`}
+    </div>`;
+}
+
+/* =====================================================================
+   POINT 5 : RELANCES IMPAYÉES EN UN CLIC
+===================================================================== */
+
+function ouvrirRelancesImpayees(){
+  const impayees = dossiers.filter(d=>{
+    const enc = parseFloat(d.montantEncaisse||0);
+    const fac = parseFloat(d.facture||0);
+    return fac > 0 && enc < fac;
+  });
+  const mecaImpayees = (typeof dossiersMecanique!=="undefined"?dossiersMecanique:[]).filter(d=>{
+    const enc = parseFloat(d.montantEncaisse||0);
+    const fac = parseFloat(d.facture||0);
+    return fac > 0 && enc < fac;
+  });
+  const toutes = [...impayees.map(d=>({...d,_type:"vitrage"})), ...mecaImpayees.map(d=>({...d,_type:"mecanique"}))];
+  const fmtE = v => Number(v||0).toLocaleString("fr-FR",{minimumFractionDigits:2})+" €";
+
+  ouvrirModal("📨 Relances impayées",
+    toutes.length===0
+    ? `<div style="text-align:center;padding:20px;color:#34d399;font-size:15px;">✅ Aucune facture impayée !</div>`
+    : `<div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="font-size:13px;color:#f87171;padding:10px;background:#1a0505;border-radius:8px;">
+          ${toutes.length} facture${toutes.length>1?"s":""} impayée${toutes.length>1?"s":""} · Total : ${fmtE(toutes.reduce((a,d)=>a+Math.max(0,Number(d.facture||0)-Number(d.montantEncaisse||0)),0))}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto;">
+          ${toutes.map((d,i)=>{
+            const solde = Math.max(0,Number(d.facture||0)-Number(d.montantEncaisse||0));
+            const jours = d.date?Math.floor((Date.now()-new Date(d.date))/86400000):null;
+            return `<div style="background:#0f172a;border-radius:8px;padding:12px;border:1px solid #1e293b;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+                <div>
+                  <span style="color:#38bdf8;font-weight:bold;">N°${d.numero}</span>
+                  <span style="color:#94a3b8;margin-left:8px;">${d._type==="vitrage"?"🪟":"🔩"}</span>
+                  <span style="color:#f0f4f8;margin-left:8px;">${d.client}</span>
+                  ${d.immat?`<span style="color:#64748b;font-size:11px;margin-left:6px;">${d.immat}</span>`:""}
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-size:16px;font-weight:900;color:#f87171;">${fmtE(solde)}</div>
+                  ${jours!==null?`<div style="font-size:11px;color:#64748b;">${jours}j de retard</div>`:""}
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                ${d.telephone?`
+                  <button onclick="envoyerSmsRelance('${d.telephone}','${d.client}','${fmtE(solde)}')" style="background:#16a34a;font-size:12px;">📱 SMS relance</button>
+                  <button onclick="window.open('tel:${d.telephone}')" style="background:#0891b2;font-size:12px;">📞 Appeler</button>`:""}
+                ${d.email?`<button onclick="window.open('mailto:${d.email}?subject=Relance+facture&body=Bonjour+${encodeURIComponent(d.client)}%2C+votre+facture+N%C2%B0${d.numero}+de+${encodeURIComponent(fmtE(solde))}+reste+impay%C3%A9e.')" style="background:#334155;font-size:12px;">✉️ Email</button>`:""}
+                <button onclick="fermerModal();ouvrirFinancierDossier(${dossiers.indexOf(d)});return false;" style="background:#7c3aed;font-size:12px;" ${d._type!=="vitrage"?"disabled":""}>💰 Encaisser</button>
+              </div>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`,
+    null
+  );
+  setTimeout(()=>{ const btn=document.getElementById("modalBtnOk"); if(btn) btn.style.display="none"; },50);
+}
+
+function envoyerSmsRelance(tel, client, montant){
+  const msg = `Bonjour ${client}, nous vous rappelons que votre facture de ${montant} auprès de ${entreprise.nom||"notre garage"} est en attente de règlement. Merci de nous contacter au ${entreprise.telephone||""}. Cordialement.`;
+  window.open(`sms:${tel}?body=${encodeURIComponent(msg)}`);
+}
+
+/* =====================================================================
+   POINT 6 : NOTES RAPIDES PAR DOSSIER
+===================================================================== */
+
+function afficherNoteDossier(index){
+  const d = dossiers[index];
+  if(!d) return;
+
+  ouvrirModal(`📝 Notes — Dossier ${d.numero} — ${d.client}`,
+    `<div style="display:flex;flex-direction:column;gap:12px;">
+      <p style="font-size:12px;color:#64748b;">Notes internes (non imprimées sur les documents clients).</p>
+      <textarea id="notesDossierInput" rows="8" style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;color:#f1f5f9;font-size:13px;resize:vertical;">${d.notes||""}</textarea>
+    </div>`,
+    function(){
+      d.notes = document.getElementById("notesDossierInput")?.value||"";
+      saveData();
+      toast("Notes enregistrées ✓");
+    }
+  );
+}
+
+function afficherNoteDossierMecanique(index){
+  const d = dossiersMecanique[index];
+  if(!d) return;
+
+  ouvrirModal(`📝 Notes — Dossier ${d.numero} — ${d.client}`,
+    `<div style="display:flex;flex-direction:column;gap:12px;">
+      <p style="font-size:12px;color:#64748b;">Notes internes (non imprimées sur les documents clients).</p>
+      <textarea id="notesDossierInput" rows="8" style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;color:#f1f5f9;font-size:13px;resize:vertical;">${d.notes||""}</textarea>
+    </div>`,
+    function(){
+      d.notes = document.getElementById("notesDossierInput")?.value||"";
+      saveData();
+      toast("Notes enregistrées ✓");
+    }
+  );
+}
+
+/* =====================================================================
+   POINT 7 : PHOTO DU VÉHICULE / DOSSIER
+===================================================================== */
+
+function ajouterPhotoDossier(index){
+  const d = dossiers[index];
+  if(!d) return;
+
+  const photos = d.photos || [];
+  ouvrirModal(`📷 Photos — Dossier ${d.numero}`,
+    `<div style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:8px;">Ajouter une photo (pare-brise, dommages, etc.)</label>
+        <input type="file" id="photoInput" accept="image/*" multiple
+          style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px;color:#f1f5f9;font-size:13px;"
+          onchange="previsualiserPhotos(this)">
+      </div>
+      <div id="previewPhotos" style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${photos.map((p,i)=>`
+          <div style="position:relative;display:inline-block;">
+            <img src="${p}" style="width:110px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #334155;">
+            <button onclick="supprimerPhotoDossier(${index},${i})" style="position:absolute;top:2px;right:2px;background:#7f1d1d;padding:1px 5px;font-size:10px;border-radius:3px;">✖</button>
+          </div>`).join("")}
+        ${photos.length===0?`<p style="color:#475569;font-size:12px;">Aucune photo</p>`:""}
+      </div>
+    </div>`,
+    function(){
+      // Sauvegarde déjà faite dans previsualiserPhotos
+    }
+  );
+}
+
+function previsualiserPhotos(input){
+  const files = Array.from(input.files);
+  const preview = document.getElementById("previewPhotos");
+  const d = dossiers[_dossierIndex];
+  if(!d) return;
+  if(!d.photos) d.photos = [];
+
+  files.forEach(file=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      d.photos.push(e.target.result);
+      saveData();
+      // Ajouter dans la preview
+      const div = document.createElement("div");
+      div.style.cssText = "position:relative;display:inline-block;";
+      const idx = d.photos.length-1;
+      div.innerHTML = `<img src="${e.target.result}" style="width:110px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #334155;">
+        <button onclick="supprimerPhotoDossier(${_dossierIndex},${idx})" style="position:absolute;top:2px;right:2px;background:#7f1d1d;padding:1px 5px;font-size:10px;border-radius:3px;">✖</button>`;
+      preview.appendChild(div);
+      toast("Photo ajoutée ✓");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function supprimerPhotoDossier(dossierIdx, photoIdx){
+  const d = dossiers[dossierIdx];
+  if(!d?.photos) return;
+  d.photos.splice(photoIdx,1);
+  saveData();
+  ajouterPhotoDossier(dossierIdx);
+  toast("Photo supprimée");
+}
+
+/* =====================================================================
+   POINT 8 : SMS AUTOMATIQUE (rappel RDV J-1)
+===================================================================== */
+
+function verifierRappelsRdv(){
+  // Appeler à chaque démarrage et toutes les heures
+  const demain = new Date();
+  demain.setDate(demain.getDate()+1);
+  const demainStr = demain.toISOString().split("T")[0];
+
+  const rdvDemain = rendezVous.filter(r=>r.date===demainStr && r.telephone && !r.rappelEnvoye);
+  if(rdvDemain.length > 0){
+    toast(`📅 ${rdvDemain.length} RDV demain — rappels SMS disponibles`, "info");
+    // Afficher notification dans la zone notifications
+    const liste = document.getElementById("listeNotifications");
+    const zone  = document.getElementById("zoneNotifications");
+    if(liste && zone){
+      rdvDemain.forEach(r=>{
+        const div = document.createElement("div");
+        div.style.cssText = "display:flex;gap:6px;align-items:flex-start;padding:4px 6px;border-radius:5px;border-left:2px solid #38bdf8;cursor:pointer;";
+        div.innerHTML = `<span style="font-size:12px;">📅</span><span style="font-size:11px;color:#94a3b8;">RDV demain : ${r.client} à ${r.heure||"?"} — <a href="sms:${r.telephone}?body=${encodeURIComponent(`Rappel : votre rendez-vous est prévu demain à ${r.heure||"?"} chez ${entreprise.nom||"notre garage"}. À demain !`)}" style="color:#38bdf8;font-size:11px;">📱 Envoyer rappel</a></span>`;
+        liste.appendChild(div);
+      });
+      zone.style.display = "";
+    }
+  }
+}
+
+// Lancer la vérification au démarrage
+setTimeout(verifierRappelsRdv, 3000);
+setInterval(verifierRappelsRdv, 3600000); // toutes les heures
+
+/* =====================================================================
+   POINT 9 : MODE CLAIR AMÉLIORÉ
+===================================================================== */
+
+const THEME_CLAIR = `
+  body, .sidebar, .content, .card, .page, section { background-color: #f8fafc !important; color: #111827 !important; }
+  .sidebar { background: #1e293b !important; }
+  .sidebar nav a { color: #cbd5e1 !important; }
+  .sidebar nav a:hover, .sidebar nav a.active { background: #334155 !important; color: #fff !important; }
+  .nav-section-label { color: #64748b !important; }
+  .card { background: #ffffff !important; border-color: #e2e8f0 !important; box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important; }
+  header { background: #ffffff !important; border-bottom-color: #e2e8f0 !important; }
+  table thead tr { background: #f1f5f9 !important; }
+  table thead th { color: #374151 !important; }
+  table tbody tr:hover { background: #f8fafc !important; }
+  table td, table th { border-color: #e2e8f0 !important; color: #374151 !important; }
+  input, select, textarea { background: #ffffff !important; color: #111827 !important; border-color: #d1d5db !important; }
+  input::placeholder { color: #9ca3af !important; }
+  .btn-success { background: #16a34a !important; color: #fff !important; }
+  button { color: #f1f5f9; }
+  .delete-btn { background: #dc2626 !important; }
+  h1,h2,h3,h4 { color: #111827 !important; }
+  .table-wrapper { background: #ffffff !important; border-color: #e2e8f0 !important; }
+  #titrePage { color: #1e3a5f !important; border-bottom-color: #e2e8f0 !important; }
+`;
+
+function toggleTheme(){
+  const isLight = document.body.classList.toggle("theme-light");
+  let styleEl = document.getElementById("themeClair");
+  if(isLight){
+    if(!styleEl){
+      styleEl = document.createElement("style");
+      styleEl.id = "themeClair";
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = THEME_CLAIR;
+    localStorage.setItem("theme","clair");
+    const btn = document.getElementById("btnTheme");
+    if(btn) btn.textContent = "🌙 Mode sombre";
+    toast("Mode clair activé");
+  } else {
+    if(styleEl) styleEl.textContent = "";
+    localStorage.setItem("theme","sombre");
+    const btn = document.getElementById("btnTheme");
+    if(btn) btn.textContent = "☀️ Mode clair";
+    toast("Mode sombre activé");
+  }
+}
+
+// Restaurer le thème au démarrage
+document.addEventListener("DOMContentLoaded",()=>{
+  if(localStorage.getItem("theme")==="clair"){
+    document.body.classList.add("theme-light");
+    let styleEl = document.getElementById("themeClair");
+    if(!styleEl){ styleEl=document.createElement("style"); styleEl.id="themeClair"; document.head.appendChild(styleEl); }
+    styleEl.textContent = THEME_CLAIR;
+    const btn = document.getElementById("btnTheme");
+    if(btn) btn.textContent = "🌙 Mode sombre";
+  }
 });
